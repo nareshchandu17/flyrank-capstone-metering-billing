@@ -1,0 +1,15 @@
+run: npm start
+seed: node scripts/seed-db.js
+test: npm test
+base_url: http://localhost:3000
+endpoints:
+  - path: /api/generate
+    method: POST
+  - path: /api/usage
+    method: POST
+  - path: /api/usage/:tenant_id
+    method: GET
+  - path: /api/stripe/checkout
+    method: POST
+  - path: /api/stripe/webhooks
+    method: POST
