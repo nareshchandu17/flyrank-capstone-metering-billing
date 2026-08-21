@@ -1,6 +1,8 @@
 require('dotenv').config();
 const app = require('./app');
 const pool = require('./config/database');
+const invoiceJob = require('./jobs/invoiceJob');
+const reconcileJob = require('./jobs/reconcileJob');
 
 const PORT = process.env.PORT || 3000;
 
@@ -32,6 +34,11 @@ async function startServer() {
     console.log(`📡 API Endpoint: http://localhost:${PORT}`);
     console.log(`🎨 Frontend UI: http://localhost:5177`);
     console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+    
+    // Start background jobs
+    invoiceJob.start();
+    reconcileJob.start();
+    
     console.log('='.repeat(60));
     console.log('💡 Available commands:');
     console.log('   npm run dev:frontend - Start only the frontend UI');

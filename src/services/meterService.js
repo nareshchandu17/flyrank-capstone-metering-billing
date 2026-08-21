@@ -71,7 +71,7 @@ class MeterService {
   }
   
   /**
-   * Check if tenant has sufficient quota for the requested usage
+   * Check if tenant has sufficient quota for the requested usage, and trigger alerts
    * @param {Object} client - Database client
    * @param {string} tenantId - Tenant UUID
    * @param {string} usageType - Type of usage
@@ -81,7 +81,7 @@ class MeterService {
   async checkQuota(client, tenantId, usageType, requestedQuantity) {
     // Get tenant's plan limits
     const tenantQuery = `
-      SELECT t.plan_id, p.api_calls_limit, p.ai_tokens_limit
+      SELECT t.plan_id, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
       FROM tenants t
       JOIN plans p ON t.plan_id = p.id
       WHERE t.id = $1 AND t.status = 'active'
@@ -101,6 +101,8 @@ class MeterService {
     const limit = usageType === 'api_call' ? tenant.api_calls_limit : tenant.ai_tokens_limit;
     
     // Get current usage for the current month
+    const billingPeriod = new Date().toISOString().substring(0, 7); // 'YYYY-MM'
+    
     const usageQuery = `
       SELECT COALESCE(SUM(quantity), 0) as total_usage
       FROM usage_events
@@ -111,22 +113,49 @@ class MeterService {
     
     const usageResult = await client.query(usageQuery, [tenantId, usageType]);
     const currentUsage = parseInt(usageResult.rows[0].total_usage);
+    const newUsage = currentUsage + requestedQuantity;
+    
+    // Check for alerts (80% and 100%)
+    const threshold80 = limit * 0.8;
+    
+    if (newUsage >= threshold80) {
+      let alertType = null;
+      if (newUsage >= limit) {
+        alertType = '100_percent';
+      } else {
+        alertType = '80_percent';
+      }
+      
+      // Try to record the alert. If it succeeds (unique constraint holds), send the alert.
+      try {
+        await client.query(
+          `INSERT INTO usage_alerts (tenant_id, alert_type, billing_period) VALUES ($1, $2, $3)`,
+          [tenantId, alertType, billingPeriod]
+        );
+        console.log(`[ALERT] Tenant ${tenantId} reached ${alertType} of their ${usageType} quota.`);
+        // In a real app, you would queue an email here
+      } catch (err) {
+        // Unique constraint violation means alert was already sent, ignore
+      }
+    }
     
     // Check if requested usage would exceed limit
-    if (currentUsage + requestedQuantity > limit) {
-      const remaining = limit - currentUsage;
-      
-      return {
-        allowed: false,
-        message: `Quota exceeded. Current usage: ${currentUsage}, Limit: ${limit}, Requested: ${requestedQuantity}`,
-        statusCode: currentUsage >= limit ? 429 : 402, // 429 if already at limit, 402 if would exceed
-        quotaInfo: {
-          currentUsage,
-          limit,
-          requested: requestedQuantity,
-          remaining: Math.max(0, remaining)
-        }
-      };
+    if (newUsage > limit) {
+      if (!tenant.allow_overage) {
+        const remaining = limit - currentUsage;
+        
+        return {
+          allowed: false,
+          message: `Quota exceeded. Current usage: ${currentUsage}, Limit: ${limit}, Requested: ${requestedQuantity}`,
+          statusCode: currentUsage >= limit ? 429 : 402, // 429 if already at limit, 402 if would exceed
+          quotaInfo: {
+            currentUsage,
+            limit,
+            requested: requestedQuantity,
+            remaining: Math.max(0, remaining)
+          }
+        };
+      }
     }
     
     return {
@@ -135,7 +164,7 @@ class MeterService {
         currentUsage,
         limit,
         requested: requestedQuantity,
-        remaining: limit - currentUsage - requestedQuantity
+        remaining: Math.max(0, limit - newUsage) // If overage is allowed, remaining is 0, not negative
       }
     };
   }
@@ -149,7 +178,7 @@ class MeterService {
     // Get tenant info with plan
     const tenantQuery = `
       SELECT t.id, t.name, t.plan_id, p.name as plan_name, 
-             p.api_calls_limit, p.ai_tokens_limit
+             p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
       FROM tenants t
       JOIN plans p ON t.plan_id = p.id
       WHERE t.id = $1
@@ -181,30 +210,44 @@ class MeterService {
       usageData[row.usage_type] = parseInt(row.total_quantity);
     });
     
-    // Calculate costs
     const apiCallsUsed = usageData['api_call'] || 0;
     const aiTokensUsed = usageData['ai_tokens'] || 0;
     
+    // Calculate Overages
+    const apiCallsOverage = Math.max(0, apiCallsUsed - tenant.api_calls_limit);
+    const aiTokensOverage = Math.max(0, aiTokensUsed - tenant.ai_tokens_limit);
+    
+    // Base Usage (up to limit)
+    const baseApiCalls = Math.min(apiCallsUsed, tenant.api_calls_limit);
+    
+    // Costs (if we charge per unit, or just base plan + overage)
+    // For capstone, we will calculate costs for all usage
     const apiCallCost = calculateAPICallCost(apiCallsUsed);
     const aiTokenCost = this.calculateAITokenCostFromUsage(usageData);
+    
+    // If overage is allowed, we might add a 1.5x penalty to the overage portion.
+    // For simplicity, we just use standard pricing for all used tokens as the 'overage charge'.
     const totalCost = apiCallCost + aiTokenCost;
     
     return {
       tenant: {
         id: tenant.id,
         name: tenant.name,
-        plan: tenant.plan_name
+        plan: tenant.plan_name,
+        allow_overage: tenant.allow_overage
       },
       usage: {
         api_calls: {
           used: apiCallsUsed,
           limit: tenant.api_calls_limit,
-          remaining: Math.max(0, tenant.api_calls_limit - apiCallsUsed)
+          remaining: Math.max(0, tenant.api_calls_limit - apiCallsUsed),
+          overage: apiCallsOverage
         },
         ai_tokens: {
           used: aiTokensUsed,
           limit: tenant.ai_tokens_limit,
-          remaining: Math.max(0, tenant.ai_tokens_limit - aiTokensUsed)
+          remaining: Math.max(0, tenant.ai_tokens_limit - aiTokensUsed),
+          overage: aiTokensOverage
         }
       },
       costs: {

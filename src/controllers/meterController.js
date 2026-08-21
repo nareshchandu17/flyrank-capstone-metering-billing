@@ -154,6 +154,42 @@ class MeterController {
       });
     }
   }
+
+  /**
+   * Get invoices for tenant
+   * GET /api/invoices/:tenant_id
+   */
+  async getInvoices(req, res) {
+    const pool = require('../config/database');
+    try {
+      const { tenant_id } = req.params;
+      
+      const invoicesResult = await pool.query(
+        'SELECT * FROM invoices WHERE tenant_id = $1 ORDER BY created_at DESC',
+        [tenant_id]
+      );
+      
+      const invoices = invoicesResult.rows;
+      
+      // Get line items for each invoice
+      for (let i = 0; i < invoices.length; i++) {
+        const lineItemsResult = await pool.query(
+          'SELECT * FROM invoice_line_items WHERE invoice_id = $1',
+          [invoices[i].id]
+        );
+        invoices[i].line_items = lineItemsResult.rows;
+        invoices[i].amount_dollars = (invoices[i].amount_cents / 100).toFixed(2);
+      }
+      
+      res.status(200).json(invoices);
+      
+    } catch (error) {
+      console.error('Error getting invoices:', error);
+      res.status(500).json({
+        error: 'Internal server error'
+      });
+    }
+  }
   
   /**
    * Health check endpoint

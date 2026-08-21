@@ -86,6 +86,91 @@ class StripeService {
   }
   
   /**
+   * Upgrade an existing subscription (handles proration automatically via Stripe)
+   * @param {string} tenantId - Tenant UUID
+   * @param {string} newPlanName - Plan name ('Free' or 'Pro')
+   * @returns {Object} - Result of upgrade
+   */
+  async upgradeSubscription(tenantId, newPlanName) {
+    try {
+      // 1. Get tenant and their current subscription
+      const tenantResult = await pool.query(
+        'SELECT * FROM tenants WHERE id = $1',
+        [tenantId]
+      );
+      
+      if (tenantResult.rows.length === 0) {
+        throw new Error('Tenant not found');
+      }
+      
+      const tenant = tenantResult.rows[0];
+      
+      const subResult = await pool.query(
+        'SELECT * FROM subscriptions WHERE tenant_id = $1 AND status = $2',
+        [tenantId, 'active']
+      );
+      
+      if (subResult.rows.length === 0) {
+        throw new Error('No active subscription found to upgrade. Use checkout instead.');
+      }
+      
+      const subscription = subResult.rows[0];
+      
+      // 2. Define Stripe price IDs
+      const priceIds = {
+        'Free': 'price_free_plan_id',
+        'Pro': 'price_pro_plan_id'
+      };
+      
+      const priceId = priceIds[newPlanName];
+      if (!priceId) {
+        throw new Error('Invalid plan name');
+      }
+      
+      // 3. Get subscription from Stripe to find the subscription item ID
+      const stripeSub = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id);
+      
+      // 4. Update the subscription in Stripe (Stripe handles proration by default)
+      const updatedSub = await stripe.subscriptions.update(
+        subscription.stripe_subscription_id,
+        {
+          items: [{
+            id: stripeSub.items.data[0].id,
+            price: priceId,
+          }],
+          proration_behavior: 'create_prorations',
+        }
+      );
+      
+      // 5. Update our DB (Tenant plan changes immediately, webhook will handle future updates)
+      const planResult = await pool.query('SELECT id FROM plans WHERE name = $1', [newPlanName]);
+      if (planResult.rows.length > 0) {
+        const planId = planResult.rows[0].id;
+        
+        await pool.query(
+          'UPDATE tenants SET plan_id = $1 WHERE id = $2',
+          [planId, tenantId]
+        );
+        
+        await pool.query(
+          'UPDATE subscriptions SET plan_id = $1 WHERE id = $2',
+          [planId, subscription.id]
+        );
+      }
+      
+      return {
+        success: true,
+        message: 'Subscription upgraded successfully. Proration applied.',
+        stripe_subscription_id: updatedSub.id
+      };
+      
+    } catch (error) {
+      console.error('Error upgrading subscription:', error);
+      throw error;
+    }
+  }
+  
+  /**
    * Handle Stripe webhook events
    * @param {string} signature - Stripe signature header
    * @param {string} payload - Raw webhook payload

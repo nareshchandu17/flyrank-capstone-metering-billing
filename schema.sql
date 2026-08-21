@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS plans (
     name VARCHAR(50) NOT NULL UNIQUE,
     api_calls_limit INTEGER NOT NULL,
     ai_tokens_limit INTEGER NOT NULL,
+    allow_overage BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -49,6 +50,36 @@ CREATE TABLE IF NOT EXISTS usage_events (
     UNIQUE(tenant_id, idempotency_key)
 );
 
+-- Usage alerts table
+CREATE TABLE IF NOT EXISTS usage_alerts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    alert_type VARCHAR(50) NOT NULL, -- '80_percent', '100_percent'
+    billing_period VARCHAR(7) NOT NULL, -- 'YYYY-MM'
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, alert_type, billing_period)
+);
+
+-- Invoices table
+CREATE TABLE IF NOT EXISTS invoices (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    billing_period VARCHAR(7) NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    status VARCHAR(50) DEFAULT 'draft',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Invoice line items table
+CREATE TABLE IF NOT EXISTS invoice_line_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    description VARCHAR(255) NOT NULL,
+    quantity INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_id ON usage_events(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at);
@@ -56,12 +87,14 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_created ON usage_events(tenan
 CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer_id ON tenants(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_id ON subscriptions(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscriptions(stripe_subscription_id);
+CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant ON usage_alerts(tenant_id, billing_period);
+CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id);
 
 -- Insert default plans
-INSERT INTO plans (name, api_calls_limit, ai_tokens_limit) VALUES 
-('Free', 1000, 100000),
-('Pro', 10000, 1000000)
-ON CONFLICT (name) DO NOTHING;
+INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage) VALUES 
+('Free', 1000, 100000, false),
+('Pro', 10000, 1000000, true)
+ON CONFLICT (name) DO UPDATE SET allow_overage = EXCLUDED.allow_overage;
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -80,4 +113,7 @@ CREATE TRIGGER update_tenants_updated_at BEFORE UPDATE ON tenants
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_invoices_updated_at BEFORE UPDATE ON invoices
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

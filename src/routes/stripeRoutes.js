@@ -4,6 +4,7 @@ const stripeController = require('../controllers/stripeController');
 
 // Stripe endpoints
 router.post('/checkout', stripeController.createCheckoutSession);
-router.post('/webhooks', stripeController.handleWebhook);
+router.post('/upgrade', stripeController.upgradeSubscription);
+router.post('/webhooks', express.raw({type: 'application/json'}), stripeController.handleWebhook);
 
 module.exports = router;

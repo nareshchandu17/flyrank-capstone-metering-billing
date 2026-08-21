@@ -39,6 +39,41 @@ class StripeController {
   }
   
   /**
+   * Upgrade subscription
+   * POST /api/stripe/upgrade
+   */
+  async upgradeSubscription(req, res) {
+    try {
+      const { tenant_id, new_plan_name } = req.body;
+      
+      if (!tenant_id || !new_plan_name) {
+        return res.status(400).json({
+          error: 'Missing required fields: tenant_id, new_plan_name'
+        });
+      }
+      
+      if (!['Free', 'Pro'].includes(new_plan_name)) {
+        return res.status(400).json({
+          error: 'Invalid plan_name. Must be "Free" or "Pro"'
+        });
+      }
+      
+      const result = await stripeService.upgradeSubscription(tenant_id, new_plan_name);
+      
+      res.status(200).json(result);
+      
+    } catch (error) {
+      console.error('Error upgrading subscription:', error);
+      if (error.message.includes('No active subscription')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({
+        error: 'Internal server error'
+      });
+    }
+  }
+  
+  /**
    * Handle Stripe webhooks
    * POST /api/stripe/webhooks
    */
