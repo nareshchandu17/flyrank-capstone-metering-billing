@@ -10,7 +10,8 @@ import {
   Fingerprint,
   Zap,
   BarChart,
-  Shield
+  Shield,
+  FileText
 } from 'lucide-react';
 
 // Word-by-word reveal component for the "Problem" section
@@ -51,7 +52,11 @@ const CodePreview = ({ activeSection }) => (
       </div>
       <div className="ml-4 text-xs text-neutral-500 font-mono flex items-center gap-2">
         <Terminal className="w-3.5 h-3.5" />
-        {activeSection === 0 ? 'POST /api/usage' : activeSection === 1 ? 'Edge Network Response' : 'Pricing Logic'}
+        {activeSection === 0 ? 'POST /api/usage' 
+         : activeSection === 1 ? 'Edge Network Response' 
+         : activeSection === 2 ? 'AI Pricing Logic'
+         : activeSection === 3 ? 'Stripe Sync.js'
+         : 'Fraud Detection'}
       </div>
     </div>
     <div className="p-6 text-sm font-mono leading-relaxed overflow-x-auto min-h-[280px]">
@@ -88,6 +93,27 @@ const CodePreview = ({ activeSection }) => (
           <div className="flex mt-4 opacity-50"><span className="text-neutral-600 w-8 select-none">7</span><span className="text-neutral-500">// Automatically applies tiered pricing rules</span></div>
         </motion.div>
       )}
+      {activeSection === 3 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">1</span><span className="text-[#f093fb]">await</span> <span className="text-white ml-2">stripe.invoices.</span><span className="text-[#4facfe]">create</span><span className="text-white">({'{'}</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">2</span><span className="text-neutral-400 ml-4">customer:</span><span className="text-[#4ade80] ml-2">tenant.stripeId</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">3</span><span className="text-neutral-400 ml-4">auto_advance:</span><span className="text-[#f093fb] ml-2">true</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">4</span><span className="text-neutral-400 ml-4">collection_method:</span><span className="text-[#4ade80] ml-2">'charge_automatically'</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">5</span><span className="text-white">{'}'});</span></div>
+          <div className="flex mt-4 opacity-50"><span className="text-neutral-600 w-8 select-none">6</span><span className="text-neutral-500">// Syncs with Stripe at the end of every month</span></div>
+        </motion.div>
+      )}
+      {activeSection === 4 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">1</span><span className="text-white">{"{"}</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">2</span><span className="text-neutral-400 ml-4">"alert":</span><span className="text-[#f5576c] ml-2">"anomalous_spike_detected"</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">3</span><span className="text-neutral-400 ml-4">"tenant":</span><span className="text-[#4ade80] ml-2">"tnt_9a8b7c"</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">4</span><span className="text-neutral-400 ml-4">"expected_usage":</span><span className="text-[#fbbf24] ml-2">5000</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">5</span><span className="text-neutral-400 ml-4">"actual_usage":</span><span className="text-[#f5576c] ml-2">850000</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">6</span><span className="text-neutral-400 ml-4">"action":</span><span className="text-[#fbbf24] ml-2">"API_KEY_SUSPENDED"</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">7</span><span className="text-white">{"}"}</span></div>
+        </motion.div>
+      )}
     </div>
   </div>
 );
@@ -113,9 +139,11 @@ const FramerLanding = () => {
   
   useEffect(() => {
     return stickyProgress.onChange((latest) => {
-      if (latest < 0.33) setActiveStickySection(0);
-      else if (latest < 0.66) setActiveStickySection(1);
-      else setActiveStickySection(2);
+      if (latest < 0.2) setActiveStickySection(0);
+      else if (latest < 0.4) setActiveStickySection(1);
+      else if (latest < 0.6) setActiveStickySection(2);
+      else if (latest < 0.8) setActiveStickySection(3);
+      else setActiveStickySection(4);
     });
   }, [stickyProgress]);
 
@@ -131,16 +159,15 @@ const FramerLanding = () => {
   const scaleHero = useTransform(heroProgress, [0, 1], [1, 0.9]);
   const yHero = useTransform(heroProgress, [0, 1], ["0%", "20%"]);
   
-  // Dashboard transforms
-  const dashBlur = useTransform(dashProgress, [0, 1], ["20px", "0px"]);
+  // Dashboard transforms (removed blur to fix UX)
   const dashScale = useTransform(dashProgress, [0, 1], [0.8, 1]);
   const dashOpacity = useTransform(dashProgress, [0, 1], [0.3, 1]);
 
   return (
     <div ref={containerRef} className="bg-black min-h-screen text-white selection:bg-[#4facfe]/30 selection:text-white font-sans">
       
-      {/* Background Grid */}
-      <div className="fixed inset-0 z-0 pointer-events-none">
+      {/* Background Grid - Unified across all sections */}
+      <div className="fixed inset-0 z-0 pointer-events-none bg-black">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:64px_64px]" />
       </div>
 
@@ -219,7 +246,7 @@ const FramerLanding = () => {
       </motion.section>
 
       {/* SECTION 2: The Problem (Word Reveal) */}
-      <section className="relative z-20 py-48 px-6 border-t border-white/5 bg-[#050505]">
+      <section className="relative z-20 py-48 px-6 bg-transparent">
         <div className="max-w-5xl mx-auto flex flex-col items-center justify-center min-h-[40vh] text-center">
           <RevealText text="Traditional billing drops events, misses AI token counts, and silently drains your MRR. You are losing revenue to network glitches." />
           <p className="mt-12 text-neutral-500 text-lg max-w-2xl">
@@ -229,7 +256,7 @@ const FramerLanding = () => {
       </section>
 
       {/* SECTION 3: The Architecture (Sticky Scroll) */}
-      <section ref={stickyRef} className="relative z-20 bg-black">
+      <section ref={stickyRef} className="relative z-20 bg-transparent">
         <div className="max-w-7xl mx-auto px-6 relative flex items-start">
           
           {/* Left Side: Sticky Visual (Code Block) */}
@@ -241,9 +268,9 @@ const FramerLanding = () => {
           </div>
 
           {/* Right Side: Scrolling Content */}
-          <div className="w-full lg:w-1/2 py-[30vh]">
+          <div className="w-full lg:w-1/2 py-[20vh]">
             {/* Feature 1 */}
-            <div className={`min-h-[70vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 0 ? 'opacity-100' : 'opacity-20'}`}>
+            <div className={`min-h-[60vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 0 ? 'opacity-100' : 'opacity-20'}`}>
               <Fingerprint className="w-10 h-10 text-[#4facfe] mb-6" />
               <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
                 Exactly-once guarantees.
@@ -254,7 +281,7 @@ const FramerLanding = () => {
             </div>
 
             {/* Feature 2 */}
-            <div className={`min-h-[70vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 1 ? 'opacity-100' : 'opacity-20'}`}>
+            <div className={`min-h-[60vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 1 ? 'opacity-100' : 'opacity-20'}`}>
               <Zap className="w-10 h-10 text-[#fbbf24] mb-6" />
               <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
                 Zero latency overhead.
@@ -265,7 +292,7 @@ const FramerLanding = () => {
             </div>
 
             {/* Feature 3 */}
-            <div className={`min-h-[70vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 2 ? 'opacity-100' : 'opacity-20'}`}>
+            <div className={`min-h-[60vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 2 ? 'opacity-100' : 'opacity-20'}`}>
               <Cpu className="w-10 h-10 text-[#f093fb] mb-6" />
               <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
                 Native AI Pricing.
@@ -274,13 +301,35 @@ const FramerLanding = () => {
                 Built specifically for LLM wrappers and AI products. Send us input, output, and cached tokens, and our billing engine automatically calculates complex tiered pricing based on the model used.
               </p>
             </div>
+
+            {/* Feature 4 */}
+            <div className={`min-h-[60vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 3 ? 'opacity-100' : 'opacity-20'}`}>
+              <FileText className="w-10 h-10 text-[#667eea] mb-6" />
+              <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+                Automated Invoicing.
+              </h2>
+              <p className="text-neutral-400 text-lg leading-relaxed max-w-md">
+                Stop manually generating PDF invoices. Our engine automatically reconciles a month of massive API usage into clean line items and pushes them directly to Stripe for payment collection.
+              </p>
+            </div>
+
+            {/* Feature 5 */}
+            <div className={`min-h-[60vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 4 ? 'opacity-100' : 'opacity-20'}`}>
+              <Shield className="w-10 h-10 text-[#f5576c] mb-6" />
+              <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+                Fraud Prevention.
+              </h2>
+              <p className="text-neutral-400 text-lg leading-relaxed max-w-md">
+                Detect anomalous usage spikes and automatically suspend compromised API keys before you rack up huge cloud bills. Intelligent rate limiting keeps your infrastructure safe.
+              </p>
+            </div>
           </div>
 
         </div>
       </section>
 
       {/* SECTION 4: The Scale / Dashboard Reveal */}
-      <section ref={dashRef} className="relative z-20 py-48 px-6 border-t border-white/5 bg-[#050505] overflow-hidden">
+      <section ref={dashRef} className="relative z-20 py-48 px-6 bg-transparent overflow-hidden">
         <div className="max-w-7xl mx-auto text-center">
           <h2 className="text-4xl md:text-6xl font-bold tracking-tight mb-6">
             Visualize your growth.
@@ -292,8 +341,7 @@ const FramerLanding = () => {
           <motion.div 
             style={{ 
               scale: dashScale, 
-              opacity: dashOpacity,
-              filter: `blur(${dashBlur.get()})` // Applying motion value to blur
+              opacity: dashOpacity
             }}
             className="relative mx-auto max-w-5xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-[#4facfe]/10"
           >
@@ -330,7 +378,7 @@ const FramerLanding = () => {
       </section>
 
       {/* SECTION 5: Footer CTA */}
-      <section className="relative z-20 border-t border-white/10 bg-black">
+      <section className="relative z-20 border-t border-white/10 bg-transparent">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#4facfe]/10 pointer-events-none" />
         <div className="max-w-5xl mx-auto px-6 py-40 text-center relative z-10">
           <h2 className="text-4xl md:text-7xl font-bold tracking-tight text-white mb-8">
