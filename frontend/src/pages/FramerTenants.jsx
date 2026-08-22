@@ -1,111 +1,92 @@
-import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { getTenants, createTenant } from '../utils/api';
 import { 
   Search, 
   Plus, 
-  MoreHorizontal, 
-  Filter,
-  ArrowUpRight,
-  TrendingUp,
   Users,
-  Building2,
-  Globe,
-  Calendar,
-  Zap,
-  Shield,
   CheckCircle,
   AlertTriangle,
   XCircle,
   Crown,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
 
 const FramerTenants = () => {
-  const tenants = [
-    {
-      id: 1,
-      name: 'Acme Corporation',
-      tier: 'Enterprise',
-      status: 'active',
-      usage: '2.8M',
-      revenue: '$45,230',
-      growth: '+15%',
-      quota: 85,
-      apiKey: 'pk_live_••••••••••••••••',
-      created: '2024-01-15'
-    },
-    {
-      id: 2,
-      name: 'TechStart Inc',
-      tier: 'Pro',
-      status: 'active',
-      usage: '1.9M',
-      revenue: '$32,100',
-      growth: '+12%',
-      quota: 72,
-      apiKey: 'pk_live_••••••••••••••••',
-      created: '2024-02-20'
-    },
-    {
-      id: 3,
-      name: 'Global Finance',
-      tier: 'Enterprise',
-      status: 'active',
-      usage: '1.5M',
-      revenue: '$28,450',
-      growth: '+8%',
-      quota: 65,
-      apiKey: 'pk_live_••••••••••••••••',
-      created: '2024-03-10'
-    },
-    {
-      id: 4,
-      name: 'CloudScale Ltd',
-      tier: 'Pro',
-      status: 'warning',
-      usage: '1.2M',
-      revenue: '$21,890',
-      growth: '+20%',
-      quota: 95,
-      apiKey: 'pk_live_••••••••••••••••',
-      created: '2024-04-05'
-    },
-    {
-      id: 5,
-      name: 'DataFlow Systems',
-      tier: 'Starter',
-      status: 'active',
-      usage: '980K',
-      revenue: '$18,340',
-      growth: '+5%',
-      quota: 45,
-      apiKey: 'pk_live_••••••••••••••••',
-      created: '2024-05-18'
-    },
-  ];
+  const [tenants, setTenants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newTenant, setNewTenant] = useState({ name: '', email: '', plan: 'Free' });
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    fetchTenants();
+  }, []);
+
+  const fetchTenants = async () => {
+    try {
+      const data = await getTenants();
+      setTenants(data);
+    } catch (error) {
+      console.error('Error fetching tenants:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateTenant = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      await createTenant(newTenant);
+      await fetchTenants();
+      setIsModalOpen(false);
+      setNewTenant({ name: '', email: '', plan: 'Free' });
+    } catch (error) {
+      console.error('Failed to create tenant:', error);
+      alert('Failed to create tenant');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const getStatusIcon = (status) => {
     switch (status) {
       case 'active':
-        return <CheckCircle className="w-5 h-5 text-[#4ade80]" />;
+        return <CheckCircle className="w-4 h-4 text-[#4ade80]" />;
       case 'warning':
-        return <AlertTriangle className="w-5 h-5 text-[#fbbf24]" />;
-      case 'error':
-        return <XCircle className="w-5 h-5 text-[#f5576c]" />;
+        return <AlertTriangle className="w-4 h-4 text-[#fbbf24]" />;
+      case 'suspended':
+        return <XCircle className="w-4 h-4 text-[#f5576c]" />;
       default:
         return null;
     }
   };
 
   const getTierIcon = (tier) => {
-    switch (tier) {
-      case 'Enterprise':
-        return <Crown className="w-5 h-5 text-[#fbbf24]" />;
-      case 'Pro':
-        return <Sparkles className="w-5 h-5 text-[#667eea]" />;
+    switch (tier?.toLowerCase()) {
+      case 'enterprise':
+        return <Crown className="w-4 h-4 text-[#fbbf24]" />;
+      case 'pro':
+        return <Sparkles className="w-4 h-4 text-[#667eea]" />;
       default:
-        return <Users className="w-5 h-5 text-neutral-400" />;
+        return <Users className="w-4 h-4 text-neutral-400" />;
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[60vh]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-[#667eea]/30 border-t-[#667eea] rounded-full animate-spin"></div>
+          <p className="text-neutral-400">Loading tenants...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const activeTenants = tenants.filter(t => t.status === 'active').length;
 
   return (
     <div className="space-y-8">
@@ -114,168 +95,221 @@ const FramerTenants = () => {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="flex items-center justify-between"
+        className="flex flex-col md:flex-row md:items-center justify-between gap-4"
       >
         <div>
-          <h1 className="text-4xl font-display font-bold text-white mb-2">
-            Tenant Management
+          <h1 className="text-4xl font-display font-bold text-white mb-2 tracking-tight">
+            Tenants
           </h1>
-          <p className="text-neutral-400">Manage all your customers and their usage patterns</p>
+          <p className="text-neutral-400">Provision and manage customer accounts</p>
         </div>
         <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white rounded-xl font-medium shadow-lg shadow-[#667eea]/30"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-black hover:bg-neutral-200 rounded-lg font-semibold transition-colors"
         >
-          <Plus className="w-5 h-5" />
-          <span>Add Tenant</span>
+          <Plus className="w-4 h-4" />
+          <span>New Tenant</span>
         </motion.button>
       </motion.div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {[
-          { label: 'Total Tenants', value: '1,247', icon: Users, gradient: 'from-[#667eea] to-[#764ba2]' },
-          { label: 'Active', value: '1,198', icon: CheckCircle, gradient: 'from-[#4ade80] to-[#38f9d7]' },
-          { label: 'At Risk', value: '45', icon: AlertTriangle, gradient: 'from-[#fbbf24] to-[#f59e0b]' },
-          { label: 'Total Revenue', value: '$284K', icon: TrendingUp, gradient: 'from-[#f093fb] to-[#f5576c]' },
+          { label: 'Total Provisioned', value: tenants.length, icon: Users, gradient: 'from-[#667eea] to-[#764ba2]' },
+          { label: 'Active Status', value: activeTenants, icon: CheckCircle, gradient: 'from-[#4ade80] to-[#38f9d7]' },
+          { label: 'Suspended/Warning', value: tenants.length - activeTenants, icon: AlertTriangle, gradient: 'from-[#fbbf24] to-[#f59e0b]' },
         ].map((stat, index) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
-            whileHover={{ y: -5, scale: 1.02 }}
-            className="group relative"
+            whileHover={{ y: -2 }}
+            className="group relative bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 overflow-hidden"
           >
-            <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 p-6 overflow-hidden">
-              <div className={`absolute inset-0 bg-gradient-to-br ${stat.gradient} opacity-0 group-hover:opacity-10 transition-opacity duration-300`} />
-              <div className="relative z-10">
-                <stat.icon className={`w-6 h-6 mb-3 bg-gradient-to-br ${stat.gradient} bg-clip-text text-transparent`} />
-                <div className="text-2xl font-display font-bold text-white mb-1">{stat.value}</div>
-                <div className="text-sm text-neutral-400">{stat.label}</div>
+            <div className="relative z-10 flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.gradient} flex items-center justify-center shadow-lg opacity-80`}>
+                <stat.icon className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <div className="text-2xl font-display font-bold text-white mb-0.5">{stat.value}</div>
+                <div className="text-sm font-medium text-neutral-500">{stat.label}</div>
               </div>
             </div>
           </motion.div>
         ))}
       </div>
 
-      {/* Search and Filters */}
+      {/* Search Bar */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="flex items-center gap-4"
+        className="relative"
       >
-        <div className="flex-1 relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
-          <input
-            type="text"
-            placeholder="Search tenants..."
-            className="w-full pl-12 pr-4 py-3 bg-[#0a0a0a]/50 backdrop-blur-xl border border-white/5 rounded-xl text-white placeholder-neutral-400 focus:outline-none focus:border-[#667eea]/50 transition-all"
-          />
-        </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="flex items-center gap-2 px-4 py-3 bg-[#0a0a0a]/50 backdrop-blur-xl border border-white/5 rounded-xl text-white hover:border-white/10 transition-all"
-        >
-          <Filter className="w-5 h-5" />
-          <span>Filters</span>
-        </motion.button>
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+        <input
+          type="text"
+          placeholder="Search by name, email, or ID..."
+          className="w-full pl-12 pr-4 py-3.5 bg-[#0a0a0a]/80 backdrop-blur-xl border border-white/10 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-[#667eea]/50 focus:ring-1 focus:ring-[#667eea]/50 transition-all font-medium"
+        />
       </motion.div>
 
-      {/* Tenant List */}
+      {/* Tenant Table */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        className="relative"
+        className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden"
       >
-        <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 overflow-hidden">
-          {/* Table Header */}
-          <div className="grid grid-cols-12 gap-4 p-6 border-b border-white/5">
-            <div className="col-span-3 text-sm font-medium text-neutral-400">Tenant</div>
-            <div className="col-span-2 text-sm font-medium text-neutral-400">Tier</div>
-            <div className="col-span-2 text-sm font-medium text-neutral-400">Usage</div>
-            <div className="col-span-2 text-sm font-medium text-neutral-400">Revenue</div>
-            <div className="col-span-2 text-sm font-medium text-neutral-400">Quota</div>
-            <div className="col-span-1 text-sm font-medium text-neutral-400">Status</div>
-          </div>
-
-          {/* Table Rows */}
-          {tenants.map((tenant, index) => (
-            <motion.div
-              key={tenant.id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5 + index * 0.1 }}
-              whileHover={{ x: 5, backgroundColor: 'rgba(255,255,255,0.03)' }}
-              className="grid grid-cols-12 gap-4 p-6 border-b border-white/5 last:border-0 transition-all cursor-pointer group"
-            >
-              {/* Tenant Info */}
-              <div className="col-span-3 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white font-bold">
-                  {tenant.name.charAt(0)}
-                </div>
-                <div>
-                  <div className="text-white font-medium mb-1">{tenant.name}</div>
-                  <div className="text-xs text-neutral-500">{tenant.apiKey}</div>
-                </div>
-              </div>
-
-              {/* Tier */}
-              <div className="col-span-2 flex items-center gap-2">
-                {getTierIcon(tenant.tier)}
-                <span className="text-white">{tenant.tier}</span>
-              </div>
-
-              {/* Usage */}
-              <div className="col-span-2 flex items-center">
-                <span className="text-white">{tenant.usage}</span>
-              </div>
-
-              {/* Revenue */}
-              <div className="col-span-2 flex items-center gap-2">
-                <span className="text-white">{tenant.revenue}</span>
-                <span className="text-xs text-[#4ade80]">{tenant.growth}</span>
-              </div>
-
-              {/* Quota */}
-              <div className="col-span-2 flex items-center">
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-neutral-400">{tenant.quota}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${tenant.quota}%` }}
-                      transition={{ delay: 0.6 + index * 0.1, duration: 0.5 }}
-                      className={`h-full rounded-full ${
-                        tenant.quota > 90 ? 'bg-gradient-to-r from-[#f5576c] to-[#f093fb]' :
-                        tenant.quota > 70 ? 'bg-gradient-to-r from-[#fbbf24] to-[#f59e0b]' :
-                        'bg-gradient-to-r from-[#667eea] to-[#764ba2]'
-                      }`}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Status */}
-              <div className="col-span-1 flex items-center justify-between">
-                {getStatusIcon(tenant.status)}
-                <motion.button
-                  whileHover={{ rotate: 90 }}
-                  className="p-2 rounded-lg hover:bg-white/5 transition-colors opacity-0 group-hover:opacity-100"
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-neutral-500 bg-white/[0.02]">
+                <th className="py-4 font-medium px-6">Tenant Name</th>
+                <th className="py-4 font-medium px-6">Plan Tier</th>
+                <th className="py-4 font-medium px-6 text-right">API / Token Usage</th>
+                <th className="py-4 font-medium px-6 text-right">Cost (MTD)</th>
+                <th className="py-4 font-medium px-6 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tenants.map((tenant, index) => (
+                <motion.tr
+                  key={tenant.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 + index * 0.05 }}
+                  className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer"
                 >
-                  <MoreHorizontal className="w-5 h-5 text-neutral-400" />
-                </motion.button>
-              </div>
-            </motion.div>
-          ))}
+                  <td className="py-4 px-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white text-xs font-bold">
+                        {tenant.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-white font-medium text-sm mb-0.5">{tenant.name}</div>
+                        <div className="text-xs text-neutral-500">{tenant.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-4 px-6">
+                    <div className="flex items-center gap-2">
+                      {getTierIcon(tenant.plan)}
+                      <span className="text-sm text-neutral-300 font-medium">{tenant.plan}</span>
+                    </div>
+                  </td>
+                  <td className="py-4 px-6 text-right">
+                    <span className="text-sm text-white font-medium">{tenant.usage?.toLocaleString() || 0}</span>
+                  </td>
+                  <td className="py-4 px-6 text-right">
+                    <span className="text-sm text-white font-medium">${tenant.cost?.toFixed(2) || '0.00'}</span>
+                  </td>
+                  <td className="py-4 px-6 text-center">
+                    <div className="flex items-center justify-center gap-1.5">
+                      {getStatusIcon(tenant.status)}
+                      <span className="text-xs font-medium capitalize text-neutral-300">{tenant.status}</span>
+                    </div>
+                  </td>
+                </motion.tr>
+              ))}
+              {tenants.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="py-12 text-center text-sm text-neutral-500">
+                    No tenants found. Click "New Tenant" to get started.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </motion.div>
+
+      {/* Create Tenant Modal */}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsModalOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-md bg-[#111] border border-white/10 rounded-2xl shadow-2xl p-6"
+            >
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <h2 className="text-xl font-display font-bold text-white mb-6">Create New Tenant</h2>
+              
+              <form onSubmit={handleCreateTenant} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-400 mb-1.5">Company Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newTenant.name}
+                    onChange={(e) => setNewTenant({...newTenant, name: e.target.value})}
+                    className="w-full px-3 py-2.5 bg-black border border-white/10 rounded-lg text-white focus:outline-none focus:border-[#667eea] transition-colors text-sm"
+                    placeholder="e.g. Acme Corp"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-400 mb-1.5">Admin Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={newTenant.email}
+                    onChange={(e) => setNewTenant({...newTenant, email: e.target.value})}
+                    className="w-full px-3 py-2.5 bg-black border border-white/10 rounded-lg text-white focus:outline-none focus:border-[#667eea] transition-colors text-sm"
+                    placeholder="admin@acme.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-400 mb-1.5">Billing Plan</label>
+                  <select
+                    value={newTenant.plan}
+                    onChange={(e) => setNewTenant({...newTenant, plan: e.target.value})}
+                    className="w-full px-3 py-2.5 bg-black border border-white/10 rounded-lg text-white focus:outline-none focus:border-[#667eea] transition-colors text-sm appearance-none"
+                  >
+                    <option value="Free">Free Tier</option>
+                    <option value="Pro">Pro Plan</option>
+                    <option value="Enterprise">Enterprise</option>
+                  </select>
+                </div>
+                
+                <div className="pt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-lg font-medium transition-colors text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="flex-1 px-4 py-2.5 bg-white text-black hover:bg-neutral-200 disabled:opacity-50 rounded-lg font-semibold transition-colors text-sm"
+                  >
+                    {creating ? 'Provisioning...' : 'Create Tenant'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
