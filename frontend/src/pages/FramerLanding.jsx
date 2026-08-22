@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { motion, useScroll, useTransform } from 'framer-motion';
+import { useRef, useEffect } from 'react';
+import { motion, useScroll, useTransform, useInView } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { 
   ArrowRight, 
@@ -7,12 +7,42 @@ import {
   Activity,
   Code2,
   Cpu,
-  Fingerprint
+  Fingerprint,
+  Zap,
+  BarChart,
+  Shield
 } from 'lucide-react';
 
-// A high-fidelity code snippet visualization
-const CodePreview = () => (
-  <div className="relative rounded-xl overflow-hidden bg-[#0a0a0a] border border-white/10 shadow-2xl">
+// Word-by-word reveal component for the "Problem" section
+const RevealText = ({ text }) => {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ["start 80%", "end 50%"]
+  });
+
+  const words = text.split(" ");
+  
+  return (
+    <p ref={ref} className="text-4xl md:text-6xl font-bold tracking-tight text-white flex flex-wrap gap-x-4 gap-y-2 max-w-4xl">
+      {words.map((word, i) => {
+        const start = i / words.length;
+        const end = start + (1 / words.length);
+        const opacity = useTransform(scrollYProgress, [start, end], [0.1, 1]);
+        
+        return (
+          <motion.span key={i} style={{ opacity }} className="inline-block">
+            {word}
+          </motion.span>
+        );
+      })}
+    </p>
+  );
+};
+
+// High-fidelity code snippet visualization
+const CodePreview = ({ activeSection }) => (
+  <div className="relative rounded-xl overflow-hidden bg-[#0a0a0a] border border-white/10 shadow-2xl transition-all duration-500 w-full">
     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-white/[0.02]">
       <div className="flex gap-1.5">
         <div className="w-3 h-3 rounded-full bg-[#f5576c]/80" />
@@ -21,75 +51,98 @@ const CodePreview = () => (
       </div>
       <div className="ml-4 text-xs text-neutral-500 font-mono flex items-center gap-2">
         <Terminal className="w-3.5 h-3.5" />
-        POST /api/usage
+        {activeSection === 0 ? 'POST /api/usage' : activeSection === 1 ? 'Edge Network Response' : 'Pricing Logic'}
       </div>
     </div>
-    <div className="p-6 text-sm font-mono leading-relaxed overflow-x-auto">
-      <div className="flex">
-        <span className="text-neutral-600 w-8 select-none">1</span>
-        <span className="text-[#f093fb]">await</span>
-        <span className="text-white ml-2">meterService.</span>
-        <span className="text-[#4facfe]">recordUsage</span>
-        <span className="text-white">({'{'}</span>
-      </div>
-      <div className="flex">
-        <span className="text-neutral-600 w-8 select-none">2</span>
-        <span className="text-neutral-400 ml-4">tenant_id:</span>
-        <span className="text-[#4ade80] ml-2">'req.tenantId'</span>
-        <span className="text-white">,</span>
-      </div>
-      <div className="flex">
-        <span className="text-neutral-600 w-8 select-none">3</span>
-        <span className="text-neutral-400 ml-4">usage_type:</span>
-        <span className="text-[#4ade80] ml-2">'ai_token'</span>
-        <span className="text-white">,</span>
-      </div>
-      <div className="flex">
-        <span className="text-neutral-600 w-8 select-none">4</span>
-        <span className="text-neutral-400 ml-4">quantity:</span>
-        <span className="text-[#fbbf24] ml-2">4096</span>
-        <span className="text-white">,</span>
-      </div>
-      <div className="flex">
-        <span className="text-neutral-600 w-8 select-none">5</span>
-        <span className="text-neutral-400 ml-4">idempotency_key:</span>
-        <span className="text-[#4ade80] ml-2">'req.headers.x-idemp-key'</span>
-      </div>
-      <div className="flex">
-        <span className="text-neutral-600 w-8 select-none">6</span>
-        <span className="text-white">{'}'});</span>
-      </div>
-      <div className="flex mt-4 opacity-50">
-        <span className="text-neutral-600 w-8 select-none">7</span>
-        <span className="text-neutral-500">// Returns: 202 Accepted</span>
-      </div>
+    <div className="p-6 text-sm font-mono leading-relaxed overflow-x-auto min-h-[280px]">
+      {activeSection === 0 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">1</span><span className="text-[#f093fb]">await</span><span className="text-white ml-2">meterService.</span><span className="text-[#4facfe]">recordUsage</span><span className="text-white">({'{'}</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">2</span><span className="text-neutral-400 ml-4">tenant_id:</span><span className="text-[#4ade80] ml-2">'req.tenantId'</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">3</span><span className="text-neutral-400 ml-4">usage_type:</span><span className="text-[#4ade80] ml-2">'ai_token'</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">4</span><span className="text-neutral-400 ml-4">idempotency_key:</span><span className="text-[#4ade80] ml-2">'req.headers.x-idemp-key'</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">5</span><span className="text-white">{'}'});</span></div>
+          <div className="flex mt-4 opacity-50"><span className="text-neutral-600 w-8 select-none">6</span><span className="text-neutral-500">// Safe to retry 1000x without double charging</span></div>
+        </motion.div>
+      )}
+      {activeSection === 1 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">1</span><span className="text-white">HTTP/2 </span><span className="text-[#4ade80]">402 Payment Required</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">2</span><span className="text-neutral-400">Content-Type:</span><span className="text-white ml-2">application/json</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">3</span><span className="text-neutral-400">X-Latency-Ms:</span><span className="text-[#fbbf24] ml-2">0.8</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">4</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">5</span><span className="text-white">{'{'}</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">6</span><span className="text-neutral-400 ml-4">"error":</span><span className="text-[#f5576c] ml-2">"quota_exceeded"</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">7</span><span className="text-neutral-400 ml-4">"limit":</span><span className="text-[#fbbf24] ml-2">1000000</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">8</span><span className="text-white">{'}'}</span></div>
+        </motion.div>
+      )}
+      {activeSection === 2 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1">
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">1</span><span className="text-[#f093fb]">const</span> <span className="text-white ml-2">cost =</span> <span className="text-[#4facfe]">calculateTokens</span><span className="text-white">({'{'}</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">2</span><span className="text-neutral-400 ml-4">model:</span><span className="text-[#4ade80] ml-2">'gpt-4-turbo'</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">3</span><span className="text-neutral-400 ml-4">prompt_tokens:</span><span className="text-[#fbbf24] ml-2">842</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">4</span><span className="text-neutral-400 ml-4">completion_tokens:</span><span className="text-[#fbbf24] ml-2">1024</span><span className="text-white">,</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">5</span><span className="text-neutral-400 ml-4">cached:</span><span className="text-[#f093fb] ml-2">true</span></div>
+          <div className="flex"><span className="text-neutral-600 w-8 select-none">6</span><span className="text-white">{'}'});</span></div>
+          <div className="flex mt-4 opacity-50"><span className="text-neutral-600 w-8 select-none">7</span><span className="text-neutral-500">// Automatically applies tiered pricing rules</span></div>
+        </motion.div>
+      )}
     </div>
   </div>
 );
 
 const FramerLanding = () => {
   const containerRef = useRef(null);
-  const { scrollYProgress } = useScroll({
+  
+  // Hero Scroll Progress
+  const { scrollYProgress: heroProgress } = useScroll({
     target: containerRef,
-    offset: ["start start", "end start"]
+    offset: ["start start", "500px start"]
   });
 
-  // Parallax transforms
-  const yBg = useTransform(scrollYProgress, [0, 1], ["0%", "50%"]);
-  const opacityHero = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
-  const scaleHero = useTransform(scrollYProgress, [0, 0.5], [1, 0.9]);
+  // Sticky Section Scroll Progress
+  const stickyRef = useRef(null);
+  const { scrollYProgress: stickyProgress } = useScroll({
+    target: stickyRef,
+    offset: ["start center", "end center"]
+  });
+
+  // Calculate active section based on scroll progress through the sticky container
+  const [activeStickySection, setActiveStickySection] = useState(0);
   
-  const yCode = useTransform(scrollYProgress, [0, 1], ["0%", "-40%"]);
-  const rotateCode = useTransform(scrollYProgress, [0, 1], [0, 5]);
+  useEffect(() => {
+    return stickyProgress.onChange((latest) => {
+      if (latest < 0.33) setActiveStickySection(0);
+      else if (latest < 0.66) setActiveStickySection(1);
+      else setActiveStickySection(2);
+    });
+  }, [stickyProgress]);
+
+  // Dashboard Reveal Progress
+  const dashRef = useRef(null);
+  const { scrollYProgress: dashProgress } = useScroll({
+    target: dashRef,
+    offset: ["start end", "center center"]
+  });
+
+  // Hero transforms
+  const opacityHero = useTransform(heroProgress, [0, 1], [1, 0]);
+  const scaleHero = useTransform(heroProgress, [0, 1], [1, 0.9]);
+  const yHero = useTransform(heroProgress, [0, 1], ["0%", "20%"]);
+  
+  // Dashboard transforms
+  const dashBlur = useTransform(dashProgress, [0, 1], ["20px", "0px"]);
+  const dashScale = useTransform(dashProgress, [0, 1], [0.8, 1]);
+  const dashOpacity = useTransform(dashProgress, [0, 1], [0.3, 1]);
 
   return (
-    <div ref={containerRef} className="bg-black min-h-[200vh] text-white selection:bg-[#4facfe]/30 selection:text-white">
+    <div ref={containerRef} className="bg-black min-h-screen text-white selection:bg-[#4facfe]/30 selection:text-white font-sans">
       
-      {/* Background Grid & Glows */}
-      <motion.div style={{ y: yBg }} className="fixed inset-0 z-0 pointer-events-none">
+      {/* Background Grid */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:64px_64px]" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] opacity-30 blur-[120px] bg-gradient-to-b from-[#4facfe]/40 to-transparent rounded-full" />
-      </motion.div>
+      </div>
 
       {/* Navbar */}
       <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-black/50 backdrop-blur-md">
@@ -106,11 +159,13 @@ const FramerLanding = () => {
         </div>
       </nav>
 
-      {/* Hero Section */}
+      {/* SECTION 1: The Hero */}
       <motion.section 
-        style={{ opacity: opacityHero, scale: scaleHero }}
-        className="relative z-10 pt-48 pb-32 px-6 flex flex-col items-center justify-center text-center max-w-5xl mx-auto"
+        style={{ opacity: opacityHero, scale: scaleHero, y: yHero }}
+        className="relative z-10 pt-48 pb-32 px-6 min-h-[90vh] flex flex-col items-center justify-center text-center max-w-5xl mx-auto"
       >
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] opacity-30 blur-[100px] bg-gradient-to-b from-[#4facfe]/40 to-[#764ba2]/40 rounded-full pointer-events-none" />
+        
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -144,7 +199,7 @@ const FramerLanding = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="flex items-center gap-4"
+          className="flex flex-col sm:flex-row items-center gap-4"
         >
           <Link 
             to="/dashboard"
@@ -163,89 +218,131 @@ const FramerLanding = () => {
         </motion.div>
       </motion.section>
 
-      {/* Interactive Architecture Preview */}
-      <section className="relative z-20 max-w-7xl mx-auto px-6 pb-48">
-        <div className="grid lg:grid-cols-2 gap-8 items-center">
-          
-          {/* Left Text */}
-          <motion.div 
-            initial={{ opacity: 0, x: -50 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true, margin: "-100px" }}
-            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-            className="space-y-12"
-          >
-            <div>
-              <h2 className="text-3xl md:text-5xl font-bold tracking-tight mb-4">
-                Exactly-once <br/>
-                <span className="text-neutral-500">guarantees.</span>
-              </h2>
-              <p className="text-neutral-400 text-lg font-light max-w-md">
-                Never double-charge a customer. Our core metering endpoints are protected by strict idempotency keys and database-level constraints.
-              </p>
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-6">
-              <div>
-                <Fingerprint className="w-6 h-6 text-[#4facfe] mb-3" />
-                <h3 className="font-semibold text-white mb-1">Idempotency</h3>
-                <p className="text-sm text-neutral-500">Network glitches? No problem. Retries are silently absorbed.</p>
-              </div>
-              <div>
-                <Activity className="w-6 h-6 text-[#4facfe] mb-3" />
-                <h3 className="font-semibold text-white mb-1">Real-time Limits</h3>
-                <p className="text-sm text-neutral-500">Instant 402/429 responses when tenants hit quota boundaries.</p>
-              </div>
-              <div>
-                <Cpu className="w-6 h-6 text-[#4facfe] mb-3" />
-                <h3 className="font-semibold text-white mb-1">AI Token Math</h3>
-                <p className="text-sm text-neutral-500">Built-in support for input, output, and cached token pricing rules.</p>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Right Code Block (Parallax) */}
-          <motion.div 
-            style={{ y: yCode, rotate: rotateCode }}
-            className="relative lg:h-[600px] flex items-center justify-center lg:justify-end origin-bottom-right"
-          >
-            {/* Glow behind code block */}
-            <div className="absolute inset-0 bg-gradient-to-tr from-[#4facfe]/20 to-transparent blur-[80px] rounded-full" />
-            
-            <div className="w-full max-w-lg relative z-10">
-              <CodePreview />
-            </div>
-          </motion.div>
-          
+      {/* SECTION 2: The Problem (Word Reveal) */}
+      <section className="relative z-20 py-48 px-6 border-t border-white/5 bg-[#050505]">
+        <div className="max-w-5xl mx-auto flex flex-col items-center justify-center min-h-[40vh] text-center">
+          <RevealText text="Traditional billing drops events, misses AI token counts, and silently drains your MRR. You are losing revenue to network glitches." />
+          <p className="mt-12 text-neutral-500 text-lg max-w-2xl">
+            Building a usage-based billing system is incredibly hard. Double charging users leads to churn, while dropping events leads to lost money. You need exactly-once guarantees.
+          </p>
         </div>
       </section>
 
-      {/* Footer CTA */}
-      <section className="relative z-20 border-t border-white/10 bg-[#050505]">
-        <div className="max-w-5xl mx-auto px-6 py-32 text-center">
-          <motion.h2 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="text-4xl md:text-6xl font-bold tracking-tight text-white mb-8"
+      {/* SECTION 3: The Architecture (Sticky Scroll) */}
+      <section ref={stickyRef} className="relative z-20 bg-black">
+        <div className="max-w-7xl mx-auto px-6 relative flex items-start">
+          
+          {/* Left Side: Sticky Visual (Code Block) */}
+          <div className="w-1/2 sticky top-0 h-screen hidden lg:flex items-center pr-16">
+            <div className="w-full relative">
+              <div className="absolute inset-0 bg-gradient-to-tr from-[#4facfe]/10 to-[#764ba2]/10 blur-[80px] rounded-full" />
+              <CodePreview activeSection={activeStickySection} />
+            </div>
+          </div>
+
+          {/* Right Side: Scrolling Content */}
+          <div className="w-full lg:w-1/2 py-[30vh]">
+            {/* Feature 1 */}
+            <div className={`min-h-[70vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 0 ? 'opacity-100' : 'opacity-20'}`}>
+              <Fingerprint className="w-10 h-10 text-[#4facfe] mb-6" />
+              <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+                Exactly-once guarantees.
+              </h2>
+              <p className="text-neutral-400 text-lg leading-relaxed max-w-md">
+                Never double-charge a customer. Our core metering endpoints are protected by strict idempotency keys. If a network request drops, your application can safely retry 10,000 times without duplicating usage.
+              </p>
+            </div>
+
+            {/* Feature 2 */}
+            <div className={`min-h-[70vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 1 ? 'opacity-100' : 'opacity-20'}`}>
+              <Zap className="w-10 h-10 text-[#fbbf24] mb-6" />
+              <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+                Zero latency overhead.
+              </h2>
+              <p className="text-neutral-400 text-lg leading-relaxed max-w-md">
+                Meter at the edge. We respond to your metering requests in sub-millisecond times, instantly returning HTTP 402/429 statuses if a tenant has breached their quota or unpaid limits.
+              </p>
+            </div>
+
+            {/* Feature 3 */}
+            <div className={`min-h-[70vh] flex flex-col justify-center transition-opacity duration-500 ${activeStickySection === 2 ? 'opacity-100' : 'opacity-20'}`}>
+              <Cpu className="w-10 h-10 text-[#f093fb] mb-6" />
+              <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">
+                Native AI Pricing.
+              </h2>
+              <p className="text-neutral-400 text-lg leading-relaxed max-w-md">
+                Built specifically for LLM wrappers and AI products. Send us input, output, and cached tokens, and our billing engine automatically calculates complex tiered pricing based on the model used.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* SECTION 4: The Scale / Dashboard Reveal */}
+      <section ref={dashRef} className="relative z-20 py-48 px-6 border-t border-white/5 bg-[#050505] overflow-hidden">
+        <div className="max-w-7xl mx-auto text-center">
+          <h2 className="text-4xl md:text-6xl font-bold tracking-tight mb-6">
+            Visualize your growth.
+          </h2>
+          <p className="text-neutral-400 text-lg max-w-2xl mx-auto mb-20">
+            A beautiful, data-dense dashboard for your finance team to track MRR, active tenants, and realtime API usage across your entire infrastructure.
+          </p>
+          
+          <motion.div 
+            style={{ 
+              scale: dashScale, 
+              opacity: dashOpacity,
+              filter: `blur(${dashBlur.get()})` // Applying motion value to blur
+            }}
+            className="relative mx-auto max-w-5xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-[#4facfe]/10"
           >
-            Deploy your billing <br/>infrastructure today.
-          </motion.h2>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.1 }}
-          >
-            <Link 
-              to="/dashboard"
-              className="inline-flex items-center gap-2 px-10 py-5 bg-white text-black rounded-lg font-semibold text-base transition-transform hover:scale-105 active:scale-95"
-            >
-              Enter Dashboard
-              <ArrowRight className="w-5 h-5" />
-            </Link>
+            {/* Mock Header of the dashboard to look like our app */}
+            <div className="bg-[#111] border-b border-white/5 px-4 py-3 flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-white/10" />
+              <div className="w-3 h-3 rounded-full bg-white/10" />
+              <div className="w-3 h-3 rounded-full bg-white/10" />
+            </div>
+            {/* A stylized abstraction of our FramerDashboard */}
+            <div className="bg-black p-8 grid grid-cols-4 gap-6 aspect-video">
+              {/* Stat blocks */}
+              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
+              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
+              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
+              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
+              {/* Chart block */}
+              <div className="col-span-3 h-64 bg-white/5 rounded-xl border border-white/5 relative overflow-hidden flex items-end px-4 pb-4 gap-2">
+                <div className="w-full h-1/2 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
+                <div className="w-full h-3/4 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
+                <div className="w-full h-2/3 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
+                <div className="w-full h-full bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
+                <div className="w-full h-1/2 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
+              </div>
+              {/* Activity block */}
+              <div className="col-span-1 h-64 bg-white/5 rounded-xl border border-white/5 flex flex-col gap-3 p-4">
+                <div className="w-full h-8 bg-white/10 rounded" />
+                <div className="w-full h-8 bg-white/10 rounded" />
+                <div className="w-full h-8 bg-white/10 rounded" />
+              </div>
+            </div>
           </motion.div>
+        </div>
+      </section>
+
+      {/* SECTION 5: Footer CTA */}
+      <section className="relative z-20 border-t border-white/10 bg-black">
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#4facfe]/10 pointer-events-none" />
+        <div className="max-w-5xl mx-auto px-6 py-40 text-center relative z-10">
+          <h2 className="text-4xl md:text-7xl font-bold tracking-tight text-white mb-8">
+            Deploy your billing <br/>infrastructure today.
+          </h2>
+          <Link 
+            to="/dashboard"
+            className="inline-flex items-center gap-2 px-10 py-5 bg-white text-black rounded-lg font-semibold text-base transition-transform hover:scale-105 active:scale-95 shadow-xl shadow-white/10"
+          >
+            Enter Dashboard
+            <ArrowRight className="w-5 h-5" />
+          </Link>
         </div>
       </section>
 
