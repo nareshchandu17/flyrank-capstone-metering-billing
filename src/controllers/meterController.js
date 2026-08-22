@@ -8,12 +8,13 @@ class MeterController {
    */
   async recordUsage(req, res) {
     try {
-      const { tenant_id, usage_type, quantity, idempotency_key, metadata } = req.body;
+      const tenant_id = req.tenantId; // Inferred from API key
+      const { usage_type, quantity, idempotency_key, metadata } = req.body;
       
       // Validate required fields
-      if (!tenant_id || !usage_type || !quantity || !idempotency_key) {
+      if (!usage_type || !quantity || !idempotency_key) {
         return res.status(400).json({
-          error: 'Missing required fields: tenant_id, usage_type, quantity, idempotency_key'
+          error: 'Missing required fields: usage_type, quantity, idempotency_key'
         });
       }
       
@@ -98,11 +99,12 @@ class MeterController {
    */
   async generate(req, res) {
     try {
-      const { tenant_id, prompt } = req.body;
+      const tenant_id = req.tenantId; // Inferred from API key
+      const { prompt, model = 'gpt-4' } = req.body;
       
-      if (!tenant_id || !prompt) {
+      if (!prompt) {
         return res.status(400).json({
-          error: 'Missing required fields: tenant_id, prompt'
+          error: 'Missing required fields: prompt'
         });
       }
       

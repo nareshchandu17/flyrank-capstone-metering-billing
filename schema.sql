@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
     amount_cents INTEGER NOT NULL
 );
 
+-- API Keys table
+CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    key_hash VARCHAR(255) NOT NULL UNIQUE,
+    prefix VARCHAR(20) NOT NULL, -- e.g., 'sk_live_'
+    name VARCHAR(100) DEFAULT 'Default Key',
+    last_used_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_id ON usage_events(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at);
@@ -89,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_id ON subscriptions(tenant_i
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscriptions(stripe_subscription_id);
 CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant ON usage_alerts(tenant_id, billing_period);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 
 -- Insert default plans
 INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage) VALUES 
@@ -116,4 +129,7 @@ CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_invoices_updated_at BEFORE UPDATE ON invoices
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_api_keys_updated_at BEFORE UPDATE ON api_keys
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
