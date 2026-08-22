@@ -351,28 +351,12 @@ const FramerLanding = () => {
               <div className="w-3 h-3 rounded-full bg-white/10" />
               <div className="w-3 h-3 rounded-full bg-white/10" />
             </div>
-            {/* A stylized abstraction of our FramerDashboard */}
-            <div className="bg-black p-8 grid grid-cols-4 gap-6 aspect-video">
-              {/* Stat blocks */}
-              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
-              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
-              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
-              <div className="col-span-1 h-32 bg-white/5 rounded-xl border border-white/5" />
-              {/* Chart block */}
-              <div className="col-span-3 h-64 bg-white/5 rounded-xl border border-white/5 relative overflow-hidden flex items-end px-4 pb-4 gap-2">
-                <div className="w-full h-1/2 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
-                <div className="w-full h-3/4 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
-                <div className="w-full h-2/3 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
-                <div className="w-full h-full bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
-                <div className="w-full h-1/2 bg-gradient-to-t from-[#667eea]/50 to-transparent rounded-t" />
-              </div>
-              {/* Activity block */}
-              <div className="col-span-1 h-64 bg-white/5 rounded-xl border border-white/5 flex flex-col gap-3 p-4">
-                <div className="w-full h-8 bg-white/10 rounded" />
-                <div className="w-full h-8 bg-white/10 rounded" />
-                <div className="w-full h-8 bg-white/10 rounded" />
-              </div>
-            </div>
+            
+            <img 
+              src="/dashboard-mockup.png" 
+              alt="Dashboard Preview" 
+              className="w-full h-auto block"
+            />
           </motion.div>
         </div>
       </section>
