@@ -21,7 +21,7 @@ class MeterController {
       }
 
       // Validate required fields
-      if (!usage_type || !quantity || !idempotency_key) {
+      if (!usage_type || quantity === undefined || quantity === null || !idempotency_key) {
         return res.status(400).json({
           error: 'Missing required fields: usage_type, quantity, idempotency_key'
         });
@@ -34,10 +34,10 @@ class MeterController {
         });
       }
       
-      // Validate quantity
-      if (quantity <= 0) {
+      // Validate quantity is strictly a positive integer
+      if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
         return res.status(400).json({
-          error: 'Quantity must be greater than 0'
+          error: 'Quantity must be a positive integer greater than zero'
         });
       }
       
@@ -49,6 +49,12 @@ class MeterController {
         metadata
       );
       
+      if (result.status === 'conflict') {
+        return res.status(result.statusCode || 409).json({
+          error: result.message
+        });
+      }
+
       if (result.status === 'rejected') {
         return res.status(result.statusCode).json({
           error: result.message,
@@ -69,6 +75,11 @@ class MeterController {
       });
       
     } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          error: error.message
+        });
+      }
       console.error('Error recording usage:', error);
       res.status(500).json({
         error: 'Internal server error'

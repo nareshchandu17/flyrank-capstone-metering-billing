@@ -56,8 +56,9 @@ CREATE TABLE IF NOT EXISTS usage_alerts (
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     alert_type VARCHAR(50) NOT NULL, -- '80_percent', '100_percent'
     billing_period VARCHAR(7) NOT NULL, -- 'YYYY-MM'
+    metric_type VARCHAR(50) NOT NULL DEFAULT 'api_call', -- 'api_call' or 'ai_tokens'
     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(tenant_id, alert_type, billing_period)
+    UNIQUE(tenant_id, alert_type, billing_period, metric_type)
 );
 
 -- Invoices table
@@ -98,6 +99,20 @@ CREATE TABLE IF NOT EXISTS api_keys (
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
+ALTER TABLE usage_alerts ADD COLUMN IF NOT EXISTS metric_type VARCHAR(50) NOT NULL DEFAULT 'api_call';
+DO $$ 
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'usage_alerts_tenant_id_alert_type_billing_period_key'
+    ) THEN
+        ALTER TABLE usage_alerts DROP CONSTRAINT usage_alerts_tenant_id_alert_type_billing_period_key;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'usage_alerts_tenant_alert_period_metric_key'
+    ) THEN
+        ALTER TABLE usage_alerts ADD CONSTRAINT usage_alerts_tenant_alert_period_metric_key UNIQUE(tenant_id, alert_type, billing_period, metric_type);
+    END IF;
+END $$;
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_id ON usage_events(tenant_id);
@@ -107,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer_id ON tenants(stripe_cust
 CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_id ON subscriptions(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscriptions(stripe_subscription_id);
 CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant ON usage_alerts(tenant_id, billing_period);
+CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant_metric ON usage_alerts(tenant_id, billing_period, metric_type);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
