@@ -12,8 +12,12 @@ async function initializeDatabase() {
     const client = await pool.connect();
     console.log('Database connection established');
     
-    // You can run schema initialization here if needed
-    // For now, we assume schema.sql has been run manually
+    // Ensure critical columns exist for existing databases
+    await client.query(`
+      ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
+      ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
+      ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
+    `);
     
     client.release();
   } catch (error) {
@@ -32,7 +36,7 @@ async function startServer() {
     console.log('='.repeat(60));
     console.log(`✅ Backend API running on port ${PORT}`);
     console.log(`📡 API Endpoint: http://localhost:${PORT}`);
-    console.log(`🎨 Frontend UI: http://localhost:5177`);
+    console.log(`🎨 Frontend UI: http://localhost:5173`);
     console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
     
     // Start background jobs

@@ -87,10 +87,17 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash VARCHAR(255) NOT NULL UNIQUE,
     prefix VARCHAR(20) NOT NULL, -- e.g., 'sk_live_'
     name VARCHAR(100) DEFAULT 'Default Key',
+    status VARCHAR(20) DEFAULT 'active',
+    revoked_at TIMESTAMP,
     last_used_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Idempotent column migrations for existing databases
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_id ON usage_events(tenant_id);
@@ -102,6 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscript
 CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant ON usage_alerts(tenant_id, billing_period);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
 
 -- Insert default plans
 INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage) VALUES 
@@ -119,17 +128,22 @@ END;
 $$ language 'plpgsql';
 
 -- Triggers for updated_at
+DROP TRIGGER IF EXISTS update_plans_updated_at ON plans;
 CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_tenants_updated_at ON tenants;
 CREATE TRIGGER update_tenants_updated_at BEFORE UPDATE ON tenants
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_subscriptions_updated_at ON subscriptions;
 CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_invoices_updated_at ON invoices;
 CREATE TRIGGER update_invoices_updated_at BEFORE UPDATE ON invoices
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_api_keys_updated_at ON api_keys;
 CREATE TRIGGER update_api_keys_updated_at BEFORE UPDATE ON api_keys
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

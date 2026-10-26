@@ -1,248 +1,266 @@
+import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { 
+  History as HistoryIcon, 
   Search, 
-  Filter, 
-  Calendar,
+  Filter,
   Download,
-  ChevronDown,
   ArrowUpRight,
-  ArrowDownRight,
-  TrendingUp,
-  Zap,
-  HardDrive,
-  Network,
-  Cpu,
+  CheckCircle,
+  Clock,
+  DollarSign,
+  User,
+  Calendar,
+  Receipt,
+  CreditCard,
+  AlertCircle,
   FileText,
-  DollarSign
+  Sparkles
 } from 'lucide-react';
-import { getUsageHistory } from '../utils/api';
+import { api } from '../services/api';
 
 const History = () => {
-  const [history, setHistory] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterMetric, setFilterMetric] = useState('all');
+  const [transactions, setTransactions] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    fetchHistory();
+    fetchHistoryData();
+    const interval = setInterval(fetchHistoryData, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchHistory = async () => {
+  const fetchHistoryData = async () => {
     try {
-      const data = await getUsageHistory();
-      setHistory(data);
-    } catch (error) {
-      console.error('Error fetching history:', error);
+      setLoading(true);
+      const [transactionsRes, statsRes] = await Promise.all([
+        api.request('/history/transactions'),
+        api.request('/history/summary'),
+      ]);
+
+      if (transactionsRes.success) setTransactions(transactionsRes.data);
+      if (statsRes.success) setStats(statsRes.data);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch history data:', err);
+      setError('Failed to load history data');
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredHistory = history.filter(item => {
-    const matchesSearch = item.tenant.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         item.metric.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterMetric === 'all' || item.metric.toLowerCase().includes(filterMetric.toLowerCase());
-    return matchesSearch && matchesFilter;
-  });
+  const filteredTransactions = transactions.filter(transaction =>
+    transaction.tenant_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    transaction.type?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  const getMetricIcon = (metric) => {
-    const icons = {
-      'API Calls': Zap,
-      'Storage': HardDrive,
-      'Bandwidth': Network,
-      'Compute Hours': Cpu,
-    };
-    return icons[metric] || FileText;
+  const getTypeIcon = (type) => {
+    switch (type) {
+      case 'invoice':
+        return <Receipt className="w-5 h-5" />;
+      case 'payment':
+        return <CreditCard className="w-5 h-5" />;
+      case 'refund':
+        return <DollarSign className="w-5 h-5" />;
+      default:
+        return <FileText className="w-5 h-5" />;
+    }
   };
 
-  const getMetricColor = (metric) => {
-    const colors = {
-      'API Calls': 'from-primary-500 to-blue-500',
-      'Storage': 'from-accent-500 to-purple-500',
-      'Bandwidth': 'from-green-500 to-emerald-500',
-      'Compute Hours': 'from-orange-500 to-red-500',
-    };
-    return colors[metric] || 'from-gray-500 to-gray-600';
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed':
+        return 'text-[#4ade80] bg-[#4ade80]/10';
+      case 'pending':
+        return 'text-[#fbbf24] bg-[#fbbf24]/10';
+      case 'failed':
+        return 'text-[#f5576c] bg-[#f5576c]/10';
+      default:
+        return 'text-neutral-400 bg-neutral-400/10';
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex items-center justify-center h-64">
+        <div className="text-neutral-400">Loading transaction history...</div>
       </div>
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-red-400">{error}</div>
+      </div>
+    );
+  }
+
+  const statsData = [
+    { label: 'Total Revenue', value: '$0', icon: DollarSign, gradient: 'from-[#667eea] to-[#764ba2]' },
+    { label: 'Transactions', value: stats?.total_transactions?.toLocaleString() || '0', icon: Receipt, gradient: 'from-[#f093fb] to-[#f5576c]' },
+    { label: 'Pending', value: stats?.pending_invoices?.toLocaleString() || '0', icon: Clock, gradient: 'from-[#fbbf24] to-[#f59e0b]' },
+    { label: 'Failed', value: '0', icon: AlertCircle, gradient: 'from-[#f5576c] to-[#f093fb]' },
+  ];
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-6"
-    >
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="flex items-center justify-between"
+      >
         <div>
-          <h1 className="text-4xl font-display font-bold mb-2">
-            Usage History
+          <h1 className="text-4xl font-display font-bold text-white mb-2">
+            Transaction History
           </h1>
-          <p className="text-gray-400">Detailed records of all usage events and billing</p>
+          <p className="text-neutral-400">View all billing transactions and payments</p>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="btn-secondary flex items-center gap-2"
-        >
-          <Download className="w-4 h-4" />
-          Export All
-        </motion.button>
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[
-          { label: 'Total Records', value: history.length, icon: FileText, color: 'from-primary-500 to-blue-500' },
-          { label: 'Total Cost', value: `$${history.reduce((sum, item) => sum + item.cost, 0).toLocaleString()}`, icon: DollarSign, color: 'from-green-500 to-emerald-500' },
-          { label: 'Avg Cost/Event', value: `$${(history.reduce((sum, item) => sum + item.cost, 0) / history.length || 0).toFixed(2)}`, icon: TrendingUp, color: 'from-accent-500 to-purple-500' },
-          { label: 'This Month', value: `$${history.slice(0, 5).reduce((sum, item) => sum + item.cost, 0).toLocaleString()}`, icon: Calendar, color: 'from-orange-500 to-red-500' },
-        ].map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <motion.div
-              key={stat.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              className="metric-card"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.color} flex items-center justify-center`}>
-                  <Icon className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <div className="text-2xl font-display font-bold text-white">{stat.value}</div>
-                  <div className="text-gray-400 text-sm">{stat.label}</div>
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Filters */}
-      <div className="glass-card p-4 flex flex-col lg:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search history..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-field pl-12"
-          />
-        </div>
-        <div className="flex gap-2 items-center">
-          <Filter className="w-5 h-5 text-gray-400" />
-          {['all', 'API', 'Storage', 'Bandwidth', 'Compute'].map((metric) => (
-            <motion.button
-              key={metric}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setFilterMetric(metric)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filterMetric === metric
-                  ? 'bg-gradient-to-r from-primary-600 to-accent-600 text-white'
-                  : 'bg-white/5 text-gray-400 hover:bg-white/10'
-              }`}
-            >
-              {metric.charAt(0).toUpperCase() + metric.slice(1)}
-            </motion.button>
-          ))}
-        </div>
-      </div>
-
-      {/* History Cards */}
-      <div className="space-y-4">
-        <AnimatePresence>
-          {filteredHistory.map((item, index) => {
-            const Icon = getMetricIcon(item.metric);
-            return (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
-                whileHover={{ scale: 1.01, x: 5 }}
-                className="glass-card-light p-6 cursor-pointer group"
-              >
-                <div className="flex items-start gap-6">
-                  <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${getMetricColor(item.metric)} flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform`}>
-                    <Icon className="w-7 h-7 text-white" />
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h3 className="text-lg font-display font-semibold text-white mb-1">
-                          {item.tenant}
-                        </h3>
-                        <div className="flex items-center gap-2 text-gray-400 text-sm">
-                          <span>{item.metric}</span>
-                          <span className="text-gray-600">•</span>
-                          <span>{new Date(item.date).toLocaleDateString()}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-2xl font-display font-bold text-white">
-                          ${item.cost}
-                        </div>
-                        <div className="text-gray-400 text-sm">
-                          {item.value.toLocaleString()} {item.unit}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-4 pt-4 border-t border-white/10">
-                      <div className="flex items-center gap-2 text-sm text-gray-400">
-                        <ArrowUpRight className="w-4 h-4 text-green-400" />
-                        <span>+12.5% from last period</span>
-                      </div>
-                      <div className="flex-1" />
-                      <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="text-primary-400 hover:text-primary-300 text-sm font-medium transition-colors"
-                      >
-                        View Details
-                      </motion.button>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
-
-      {/* Load More */}
-      {filteredHistory.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center"
-        >
+        <div className="flex items-center gap-3">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="btn-secondary px-8"
+            className="flex items-center gap-2 px-4 py-3 bg-[#0a0a0a]/50 backdrop-blur-xl border border-white/5 rounded-xl text-white hover:border-white/10 transition-all"
           >
-            Load More Records
+            <Filter className="w-5 h-5" />
+            <span>Filter</span>
           </motion.button>
-        </motion.div>
-      )}
-    </motion.div>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white rounded-xl font-medium shadow-lg shadow-[#667eea]/30"
+          >
+            <Download className="w-5 h-5" />
+            <span>Export</span>
+          </motion.button>
+        </div>
+      </motion.div>
+
+      {/* Stats Row */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {statsData.map((stat, index) => (
+          <motion.div
+            key={stat.label}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.1 }}
+            whileHover={{ y: -5, scale: 1.02 }}
+            className="group relative"
+          >
+            <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 p-6 overflow-hidden">
+              <div className={`absolute inset-0 bg-gradient-to-br ${stat.gradient} opacity-0 group-hover:opacity-10 transition-opacity duration-300`} />
+              <div className="relative z-10">
+                <stat.icon className={`w-6 h-6 mb-3 bg-gradient-to-br ${stat.gradient} bg-clip-text text-transparent`} />
+                <div className="text-2xl font-display font-bold text-white mb-1">{stat.value}</div>
+                <div className="text-sm text-neutral-400">{stat.label}</div>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Search */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="relative"
+      >
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
+        <input
+          type="text"
+          placeholder="Search transactions..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full pl-12 pr-4 py-3 bg-[#0a0a0a]/50 backdrop-blur-xl border border-white/5 rounded-xl text-white placeholder-neutral-400 focus:outline-none focus:border-[#667eea]/50 transition-all"
+        />
+      </motion.div>
+
+      {/* Transaction List */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="relative"
+      >
+        <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 overflow-hidden">
+          {/* Table Header */}
+          <div className="grid grid-cols-12 gap-4 p-6 border-b border-white/5">
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Type</div>
+            <div className="col-span-3 text-sm font-medium text-neutral-400">Tenant</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Amount</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Date</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Status</div>
+            <div className="col-span-1 text-sm font-medium text-neutral-400">Action</div>
+          </div>
+
+          {/* Table Rows */}
+          {filteredTransactions.length > 0 ? (
+            filteredTransactions.map((transaction, index) => (
+              <motion.div
+                key={transaction.id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 + index * 0.1 }}
+                whileHover={{ x: 5, backgroundColor: 'rgba(255,255,255,0.03)' }}
+                className="grid grid-cols-12 gap-4 p-6 border-b border-white/5 last:border-0 transition-all cursor-pointer group"
+              >
+                {/* Type */}
+                <div className="col-span-2 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white">
+                    {getTypeIcon(transaction.type)}
+                  </div>
+                  <span className="text-white capitalize">{transaction.type}</span>
+                </div>
+
+                {/* Tenant */}
+                <div className="col-span-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white font-bold text-sm">
+                    {transaction.tenant_name?.charAt(0) || 'U'}
+                  </div>
+                  <span className="text-white">{transaction.tenant_name || 'Unknown'}</span>
+                </div>
+
+                {/* Amount */}
+                <div className="col-span-2 flex items-center">
+                  <span className="text-white font-medium">{transaction.amount}</span>
+                </div>
+
+                {/* Date */}
+                <div className="col-span-2 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-neutral-400" />
+                  <span className="text-white">{new Date(transaction.created_at).toLocaleDateString()}</span>
+                </div>
+
+                {/* Status */}
+                <div className="col-span-2 flex items-center">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(transaction.status)}`}>
+                    {transaction.status}
+                  </span>
+                </div>
+
+                {/* Action */}
+                <div className="col-span-1 flex items-center justify-end">
+                  <motion.button
+                    whileHover={{ scale: 1.1, rotate: 45 }}
+                    whileTap={{ scale: 0.9 }}
+                    className="p-2 rounded-lg hover:bg-white/5 transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <ArrowUpRight className="w-5 h-5 text-neutral-400" />
+                  </motion.button>
+                </div>
+              </motion.div>
+            ))
+          ) : (
+            <div className="text-center text-neutral-400 py-8">No transactions found</div>
+          )}
+        </div>
+      </motion.div>
+    </div>
   );
 };
 

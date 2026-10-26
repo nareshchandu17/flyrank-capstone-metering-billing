@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const meterController = require('../controllers/meterController');
-const { requireApiKey } = require('../middleware/auth');
+const { requireApiKey, requireTenantOrAdmin } = require('../middleware/auth');
 
 // Health check
 router.get('/health', meterController.healthCheck);
@@ -9,7 +9,11 @@ router.get('/health', meterController.healthCheck);
 // Core metering endpoints (Protected by API Key)
 router.post('/usage', requireApiKey, meterController.recordUsage);
 router.post('/generate', requireApiKey, meterController.generate);
-router.get('/usage/:tenant_id', meterController.getUsageSummary);
-router.get('/invoices/:tenant_id', meterController.getInvoices);
+
+// Tenant-scoped usage summaries and invoices (Protected by Tenant or Admin Auth)
+router.get('/usage', requireTenantOrAdmin, meterController.getUsageSummary);
+router.get('/usage/:tenant_id', requireTenantOrAdmin, meterController.getUsageSummary);
+router.get('/invoices', requireTenantOrAdmin, meterController.getInvoices);
+router.get('/invoices/:tenant_id', requireTenantOrAdmin, meterController.getInvoices);
 
 module.exports = router;

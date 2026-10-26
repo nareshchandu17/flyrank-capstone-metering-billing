@@ -1,5 +1,4 @@
 const cron = require('node-cron');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const pool = require('../config/database');
 
 /**
@@ -7,6 +6,13 @@ const pool = require('../config/database');
  * Runs nightly to catch any missed Stripe webhooks by comparing Stripe state with our DB
  */
 class ReconcileJob {
+  getStripeClient() {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return null;
+    }
+    return require('stripe')(process.env.STRIPE_SECRET_KEY);
+  }
+
   start() {
     // Run at 02:00 AM every day
     cron.schedule('0 2 * * *', async () => {
@@ -17,6 +23,12 @@ class ReconcileJob {
   }
 
   async reconcile() {
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      console.log('Stripe reconciliation skipped: Stripe is not configured');
+      return;
+    }
+
     const client = await pool.connect();
     try {
       // 1. Get all tenants with a stripe_customer_id
@@ -29,7 +41,7 @@ class ReconcileJob {
 
       for (const tenant of tenantsResult.rows) {
         try {
-          await this.reconcileTenant(client, tenant);
+          await this.reconcileTenant(client, tenant, stripe);
           syncCount++;
         } catch (err) {
           console.error(`Reconciliation failed for tenant ${tenant.id}:`, err);
@@ -45,7 +57,7 @@ class ReconcileJob {
     }
   }
 
-  async reconcileTenant(client, tenant) {
+  async reconcileTenant(client, tenant, stripe) {
     // 1. Fetch active subscriptions from Stripe
     const stripeSubs = await stripe.subscriptions.list({
       customer: tenant.stripe_customer_id,
@@ -68,8 +80,9 @@ class ReconcileJob {
       
       // Determine plan from Stripe Price ID
       const priceId = activeStripeSub.items.data[0].price.id;
+      const proPriceId = process.env.STRIPE_PRICE_PRO || process.env.STRIPE_PRICE_PRO_ID || 'price_pro_plan_id';
       let planName = 'Free';
-      if (priceId === 'price_pro_plan_id') planName = 'Pro';
+      if (priceId === proPriceId) planName = 'Pro';
       
       const planResult = await client.query("SELECT id FROM plans WHERE name = $1", [planName]);
       const planId = planResult.rows[0].id;
@@ -111,9 +124,6 @@ class ReconcileJob {
     
     // Case C: Plan mismatch (e.g. upgraded but missed webhook)
     else if (activeStripeSub && dbSub) {
-      // In a real implementation, we would compare the priceId with the plan_id
-      // For simplicity here, we'll just ensure current_period_end is synced
-      
       const dbEnd = new Date(dbSub.current_period_end).getTime() / 1000;
       if (Math.abs(dbEnd - activeStripeSub.current_period_end) > 86400) { // 1 day difference
         console.log(`[RECONCILE] Updating subscription period for tenant ${tenant.id}`);

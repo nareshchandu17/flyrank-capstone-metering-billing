@@ -12,14 +12,17 @@ function generateUUID() {
 describe('MeterService', () => {
   let testTenantId;
   let testPlanId;
+
+  const cleanTestData = async () => {
+    await pool.query("DELETE FROM usage_events WHERE tenant_id IN (SELECT id FROM tenants WHERE email IN ('test@example.com', 'small429-test@example.com'))");
+    await pool.query("DELETE FROM subscriptions WHERE tenant_id IN (SELECT id FROM tenants WHERE email IN ('test@example.com', 'small429-test@example.com'))");
+    await pool.query("DELETE FROM api_keys WHERE tenant_id IN (SELECT id FROM tenants WHERE email IN ('test@example.com', 'small429-test@example.com'))");
+    await pool.query("DELETE FROM tenants WHERE email IN ('test@example.com', 'small429-test@example.com')");
+    await pool.query("DELETE FROM plans WHERE name IN ('Test Plan', 'Small Plan 429')");
+  };
   
   beforeAll(async () => {
-    // Clean up only our specific test data in correct order (children first)
-    await pool.query('DELETE FROM usage_events WHERE tenant_id IN (SELECT id FROM tenants WHERE email = $1)', ['test@example.com']);
-    await pool.query('DELETE FROM subscriptions WHERE tenant_id IN (SELECT id FROM tenants WHERE email = $1)', ['test@example.com']);
-    await pool.query('DELETE FROM tenants WHERE email = $1', ['test@example.com']);
-    await pool.query('DELETE FROM plans WHERE name = $1', ['Test Plan']);
-    await pool.query('DELETE FROM plans WHERE name = $1', ['Small Plan 429']);
+    await cleanTestData();
     
     // Create test plan
     const planResult = await pool.query(
@@ -37,12 +40,7 @@ describe('MeterService', () => {
   });
   
   afterAll(async () => {
-    // Clean up only our specific test data in correct order (children first)
-    await pool.query('DELETE FROM usage_events WHERE tenant_id IN (SELECT id FROM tenants WHERE email = $1)', ['test@example.com']);
-    await pool.query('DELETE FROM subscriptions WHERE tenant_id IN (SELECT id FROM tenants WHERE email = $1)', ['test@example.com']);
-    await pool.query('DELETE FROM tenants WHERE email = $1', ['test@example.com']);
-    await pool.query('DELETE FROM plans WHERE name = $1', ['Test Plan']);
-    await pool.query('DELETE FROM plans WHERE name = $1', ['Small Plan 429']);
+    await cleanTestData();
   });
   
   describe('recordUsage', () => {
@@ -146,11 +144,10 @@ describe('MeterService', () => {
       expect(result.status).toBe('rejected');
       expect(result.statusCode).toBe(429);
       
-      // Cleanup in correct order
+      // Cleanup
       await pool.query('DELETE FROM usage_events WHERE tenant_id = $1', [smallTenantId]);
       await pool.query('DELETE FROM subscriptions WHERE tenant_id = $1', [smallTenantId]);
       await pool.query('DELETE FROM tenants WHERE id = $1', [smallTenantId]);
-      // Don't delete the plan here, let afterAll handle it
     });
   });
   

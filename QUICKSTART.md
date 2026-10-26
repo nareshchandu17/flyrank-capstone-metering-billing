@@ -1,169 +1,103 @@
 # Quick Start Guide
 
-This guide will help you get the Usage Metering & Billing Engine running locally in minutes.
+This guide will help you get the Usage Metering & Billing Engine running locally in minutes from a clean clone.
 
 ## Prerequisites
 
-- Node.js (v14 or higher)
+- Node.js (v18+)
 - Docker and Docker Compose
 - Git
 
-## Step 1: Clone and Setup
+## Step 1: Install Dependencies
 
 ```bash
-# Navigate to project directory
-cd usage-metering-billing-engine
-
-# Install dependencies
 npm install
 ```
 
 ## Step 2: Configure Environment
 
 ```bash
-# Copy environment template
 cp .env.example .env
-
-# Edit .env with your settings
-# For local development, defaults should work
 ```
+Default values in `.env` are ready for local development:
+- `ADMIN_API_KEY=admin-secret-key`
+- PostgreSQL mapped to port `5434` (Docker default)
+- Stripe is optional and test-ready
 
-## Step 3: Start Database
+## Step 3: Start and Initialize Database
 
 ```bash
 # Start PostgreSQL container
 npm run db:start
 
-# Initialize database schema
+# Initialize database schema & verify migrations
 npm run db:init
 ```
 
-## Step 4: Start the Server
+## Step 4: Seed Demo Tenant & API Key
 
 ```bash
-# Start the application
-npm start
+node scripts/seed-db.js
+```
+Output:
+```
+Successfully seeded database for Demo Prep.
+Tenant ID:  <TENANT_UUID>
+API Key:    sk_live_<SECRET>
+Admin Key:  admin-secret-key
 ```
 
-The server will start on `http://localhost:3000`
+## Step 5: Start the Server
 
-## Step 5: Test the API
+```bash
+npm start
+```
+Server runs on `http://localhost:3000` (or configured `PORT`).
 
-### Health Check
+## Step 6: Test Authenticated Endpoints
+
+### 1. Health Check
 ```bash
 curl http://localhost:3000/api/health
 ```
 
-### Create a Test Tenant
-First, you'll need to create a tenant in the database:
-
+### 2. Admin Endpoint (Requires Admin Key)
 ```bash
-# Connect to PostgreSQL
-docker exec -it usage_metering_db psql -U postgres -d usage_metering
-
-# Create a test tenant
-INSERT INTO tenants (name, email, plan_id) 
-VALUES ('Test Company', 'test@company.com', (SELECT id FROM plans WHERE name = 'Free'));
-
-# Get the tenant ID
-SELECT id FROM tenants WHERE email = 'test@company.com';
+curl -H "Authorization: Bearer admin-secret-key" http://localhost:3000/api/admin/tenants
 ```
 
-### Record Usage
+### 3. Record Billable Usage (Requires Tenant API Key)
 ```bash
-# Replace YOUR_TENANT_ID with the actual UUID from above
 curl -X POST http://localhost:3000/api/usage \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "tenant_id": "YOUR_TENANT_ID",
     "usage_type": "api_call",
-    "quantity": 10,
-    "idempotency_key": "test-unique-key-123"
+    "quantity": 1,
+    "idempotency_key": "unique-request-123"
   }'
 ```
 
-### Get Usage Summary
+### 4. Get Tenant Usage Summary (Scoped)
 ```bash
-curl http://localhost:3000/api/usage/YOUR_TENANT_ID
+curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:3000/api/usage
 ```
 
-## Step 6: Run Tests
+### 5. API Key Rotation
+```bash
+curl -X POST http://localhost:3000/api/tenants/YOUR_TENANT_ID/api-keys/YOUR_KEY_ID/rotate \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+## Step 7: Run Automated Tests
 
 ```bash
-# Start test database
-npm run test:db:start
-
-# Initialize test database
-npm run test:db:init
-
-# Run tests
 npm test
 ```
-
-## Step 7: Stripe Integration (Optional)
-
-For Stripe integration, you'll need:
-
-1. A Stripe account (free)
-2. Stripe CLI installed
-
-```bash
-# Set your Stripe test keys in .env
-STRIPE_SECRET_KEY=sk_test_your_key_here
-STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
-
-# Forward webhooks to localhost
-stripe listen --forward-to localhost:3000/api/stripe/webhooks
-
-# Trigger test events
-stripe trigger checkout.session.completed
-```
-
-## Troubleshooting
-
-### Database Connection Issues
-```bash
-# Check if PostgreSQL is running
-docker ps
-
-# Check database logs
-docker logs usage_metering_db
-
-# Restart database
-npm run db:stop
-npm run db:start
-```
-
-### Port Already in Use
-Change the port in `.env`:
-```env
-PORT=3001
-```
-
-### Permission Issues
-Make sure Docker has proper permissions:
-```bash
-# On Linux/Mac
-sudo usermod -aG docker $USER
-
-# On Windows, run Docker Desktop as administrator
-```
-
-## Next Steps
-
-- Read the full [README.md](README.md) for detailed documentation
-- Review [EVIDENCE.md](EVIDENCE.md) for implementation proof
-- Check [BUILDLOG.md](BUILDLOG.md) for development details
-- Explore the API endpoints and integrate with your application
+All tests including security, scoping, idempotency, and Stripe verification run against the test suite.
 
 ## Stopping the Application
 
 ```bash
-# Stop the server (Ctrl+C)
-
-# Stop the database
 npm run db:stop
-
-# Clean up everything (including volumes)
-docker-compose down -v
 ```

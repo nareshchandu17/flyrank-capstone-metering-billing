@@ -31,9 +31,9 @@ class StripeController {
       });
       
     } catch (error) {
-      console.error('Error creating checkout session:', error);
-      res.status(500).json({
-        error: 'Internal server error'
+      console.error('Error creating checkout session:', error.message);
+      res.status(error.statusCode || 500).json({
+        error: error.message || 'Internal server error'
       });
     }
   }
@@ -63,12 +63,12 @@ class StripeController {
       res.status(200).json(result);
       
     } catch (error) {
-      console.error('Error upgrading subscription:', error);
+      console.error('Error upgrading subscription:', error.message);
       if (error.message.includes('No active subscription')) {
         return res.status(400).json({ error: error.message });
       }
-      res.status(500).json({
-        error: 'Internal server error'
+      res.status(error.statusCode || 500).json({
+        error: error.message || 'Internal server error'
       });
     }
   }
@@ -80,7 +80,10 @@ class StripeController {
   async handleWebhook(req, res) {
     try {
       const signature = req.headers['stripe-signature'];
-      const payload = req.body;
+      // Prefer raw Buffer body for HMAC verification
+      const payload = Buffer.isBuffer(req.body)
+        ? req.body
+        : (req.rawBody || req.body);
       
       if (!signature) {
         return res.status(400).json({
@@ -91,7 +94,7 @@ class StripeController {
       const result = await stripeService.handleWebhook(signature, payload);
       
       if (result.status === 'error') {
-        return res.status(result.statusCode).json({
+        return res.status(result.statusCode || 400).json({
           error: result.message
         });
       }
@@ -102,7 +105,7 @@ class StripeController {
       });
       
     } catch (error) {
-      console.error('Error handling webhook:', error);
+      console.error('Error handling webhook:', error.message);
       res.status(500).json({
         error: 'Internal server error'
       });

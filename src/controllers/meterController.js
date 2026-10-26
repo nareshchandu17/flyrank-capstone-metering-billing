@@ -1,5 +1,7 @@
 const meterService = require('../services/meterService');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
+const uuidv4 = () => (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'));
+const pool = require('../config/database');
 
 class MeterController {
   /**
@@ -8,9 +10,16 @@ class MeterController {
    */
   async recordUsage(req, res) {
     try {
-      const tenant_id = req.tenantId; // Inferred from API key
+      // Inferred securely from API key (or admin request)
+      const tenant_id = req.tenantId || (req.isAdmin ? req.body.tenant_id : null);
       const { usage_type, quantity, idempotency_key, metadata } = req.body;
       
+      if (!tenant_id) {
+        return res.status(400).json({
+          error: 'Tenant ID could not be identified from authentication'
+        });
+      }
+
       // Validate required fields
       if (!usage_type || !quantity || !idempotency_key) {
         return res.status(400).json({
@@ -69,13 +78,27 @@ class MeterController {
   
   /**
    * Get usage summary for tenant
-   * GET /api/usage/:tenant_id
+   * GET /api/usage/:tenant_id or GET /api/usage
    */
   async getUsageSummary(req, res) {
     try {
-      const { tenant_id } = req.params;
+      const targetTenantId = req.params.tenant_id || req.tenantId;
       
-      const summary = await meterService.getUsageSummary(tenant_id);
+      if (!targetTenantId) {
+        return res.status(400).json({
+          error: 'Tenant ID is required'
+        });
+      }
+
+      // Enforce tenant scoping: non-admin tenants can only view their own usage
+      if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only access data for your own tenant'
+        });
+      }
+      
+      const summary = await meterService.getUsageSummary(targetTenantId);
       
       res.status(200).json(summary);
       
@@ -159,16 +182,29 @@ class MeterController {
 
   /**
    * Get invoices for tenant
-   * GET /api/invoices/:tenant_id
+   * GET /api/invoices/:tenant_id or GET /api/invoices
    */
   async getInvoices(req, res) {
-    const pool = require('../config/database');
     try {
-      const { tenant_id } = req.params;
+      const targetTenantId = req.params.tenant_id || req.tenantId;
+
+      if (!targetTenantId) {
+        return res.status(400).json({
+          error: 'Tenant ID is required'
+        });
+      }
+
+      // Enforce tenant scoping: non-admin tenants can only view their own invoices
+      if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only access data for your own tenant'
+        });
+      }
       
       const invoicesResult = await pool.query(
         'SELECT * FROM invoices WHERE tenant_id = $1 ORDER BY created_at DESC',
-        [tenant_id]
+        [targetTenantId]
       );
       
       const invoices = invoicesResult.rows;

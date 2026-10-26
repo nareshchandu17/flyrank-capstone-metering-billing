@@ -1,12 +1,21 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:3000/api/admin';
+const API_BASE_URL = 'http://localhost:3001/api/admin';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// Automatically inject admin / auth token into requests
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_api_key') || 'admin-secret-key';
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export const getTenants = async () => {

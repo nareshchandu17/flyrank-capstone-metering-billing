@@ -1,52 +1,55 @@
-const { exec } = require('child_process');
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const { Client } = require('pg');
 
-function execPromise(command) {
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve(stdout);
-      }
-    });
-  });
-}
-
-async function waitForPostgres() {
-  console.log('Waiting for PostgreSQL to be ready...');
-  
-  const maxAttempts = 30;
+async function waitForConnection(clientConfig, maxAttempts = 30) {
   let attempts = 0;
-  
+  console.log('Waiting for PostgreSQL to be ready...');
+
   while (attempts < maxAttempts) {
+    const client = new Client(clientConfig);
     try {
-      await execPromise('docker exec usage_metering_db pg_isready -U postgres');
-      console.log('PostgreSQL is ready');
+      await client.connect();
+      await client.query('SELECT 1');
+      await client.end();
+      console.log('PostgreSQL is ready and accepting connections');
       return true;
-    } catch (error) {
+    } catch (err) {
       attempts++;
-      console.log(`PostgreSQL is unavailable - attempt ${attempts}/${maxAttempts}`);
+      console.log(`Waiting for PostgreSQL (${err.message}) - attempt ${attempts}/${maxAttempts}`);
+      try { await client.end(); } catch (e) {}
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
-  
+
   throw new Error('PostgreSQL did not become ready in time');
 }
 
 async function initializeDatabase() {
+  const connectionString = process.env.DATABASE_URL;
+  const clientConfig = connectionString 
+    ? { connectionString }
+    : {
+        host: process.env.DB_HOST || 'localhost',
+        port: parseInt(process.env.DB_PORT || '5432', 10),
+        database: process.env.DB_NAME || 'usage_metering',
+        user: process.env.DB_USER || 'postgres',
+        password: process.env.DB_PASSWORD || 'password',
+      };
+
   try {
-    await waitForPostgres();
-    
-    console.log('Initializing database schema...');
-    
-    // Copy schema into container
-    await execPromise('docker cp schema.sql usage_metering_db:/tmp/schema.sql');
-    
-    // Execute schema
-    await execPromise('docker exec usage_metering_db psql -U postgres -d usage_metering -f /tmp/schema.sql');
-    
+    await waitForConnection(clientConfig);
+
+    console.log('Applying database schema from schema.sql...');
+    const schemaPath = path.resolve(__dirname, '../schema.sql');
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+
+    const client = new Client(clientConfig);
+    await client.connect();
+    await client.query(schemaSql);
+    await client.end();
+
     console.log('Database initialization completed successfully');
   } catch (error) {
     console.error('Database initialization failed:', error.message);
@@ -54,4 +57,8 @@ async function initializeDatabase() {
   }
 }
 
-initializeDatabase();
+if (require.main === module) {
+  initializeDatabase();
+}
+
+module.exports = { initializeDatabase };

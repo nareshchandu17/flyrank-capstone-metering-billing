@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
+const { requireAdminAuth } = require('../middleware/auth');
+
+// Protect all admin endpoints with requireAdminAuth
+router.use(requireAdminAuth);
 
 // Tenant Management
 router.get('/tenants', adminController.getTenants);

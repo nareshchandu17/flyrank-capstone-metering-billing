@@ -4,229 +4,171 @@ A production-grade backend service for SaaS usage metering, quota enforcement, a
 
 ## Features
 
+- **Authentication & Authorization**: Protected administrative operations and tenant-scoped access
+- **API Key Lifecycle**: Secure API key creation, listing, rotation, and immediate revocation
+- **Tenant Scoping**: Strict isolation preventing tenants from viewing or altering other tenants' usage or invoices
 - **Idempotent Usage Metering**: Exactly-once semantics prevent double-charging from network retries
 - **Quota Enforcement**: Honest API boundaries with proper status codes (429/402)
 - **AI Token Pricing**: Handles complex pricing rules (cached tokens, reasoning tokens, etc.)
-- **Stripe Integration**: Test-mode subscription management with verified webhooks
+- **Stripe Integration & Optional Mode**: Raw-body HMAC verification, configurable Price IDs, and seamless startup without Stripe configured
 - **Cost Calculation**: Accurate money math using integer arithmetic
-- **Multi-tenant Architecture**: Data isolation per tenant
 
 ## Tech Stack
 
 - **Runtime**: Node.js with Express
 - **Database**: PostgreSQL with Docker
-- **Payments**: Stripe (Test Mode)
-- **Testing**: Jest with Supertest
+- **Payments**: Stripe (Test Mode, optional)
+- **Testing**: Jest with Supertest 
 - **Money Handling**: Integer arithmetic (cents/micro-units)
 
-## Architecture
-
-```
-Client ─► Billable API request
-└─► MeterService.record(tenant, type, qty, idempotencyKey)
-├─ duplicate key? → return original result (no new event)
-├─ store usage_event
-└─► Quota Check ─► allowed
-└─► limit exceeded → 402 / 429 + clear message
-
-GET /usage ◄── rollup(usage_events) → { used, limit, cost }
-
-Stripe Checkout (test mode) ─► subscription created
-Stripe ─signed webhook─► /webhooks/stripe
-├─► verify signature (forged → 400)
-├─► deduplicate event (replay → ignored)
-└─► update tenant plan / status
-```
-
-## Setup
+## Setup & Quickstart
 
 ### Prerequisites
 
-- Node.js (v14+)
+- Node.js (v18+)
 - Docker and Docker Compose
-- Stripe CLI (for local webhook testing)
 
-### Installation
-
-1. Clone the repository
-2. Copy environment variables:
-```bash
-cp .env.example .env
-```
-
-3. Start PostgreSQL:
-```bash
-docker-compose up -d
-```
-
-4. Initialize database schema:
-```bash
-psql -h localhost -U postgres -d usage_metering -f schema.sql
-```
-
-5. Install dependencies:
+### Step 1: Install Dependencies
 ```bash
 npm install
 ```
 
-6. Configure Stripe test keys in `.env`:
-```env
-STRIPE_SECRET_KEY=sk_test_your_key_here
-STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
+### Step 2: Configure Environment
+```bash
+cp .env.example .env
+```
+Default values in `.env.example` are pre-configured to work immediately.
+
+### Step 3: Start & Initialize PostgreSQL
+```bash
+# Start PostgreSQL container
+npm run db:start
+
+# Initialize database schema and verify migrations
+npm run db:init
 ```
 
-### Running the Application
+### Step 4: Seed Demo Data (Optional)
+```bash
+npm run seed
+```
+This prints a demo `Tenant ID`, an active `API Key`, and the `Admin Key`.
 
+### Step 5: Start the Server
 ```bash
 npm start
 ```
+Starts backend on `http://localhost:3000` (or configured `PORT`).
 
-The server will start on port 3000 by default.
+> **Note on Stripe**: Stripe is completely optional. The platform starts and runs cleanly from a fresh clone without any Stripe credentials. When Stripe keys are omitted, Stripe endpoints gracefully respond with `503 Service Unavailable`.
 
-## API Endpoints
+---
 
-### Usage Metering
+## Authentication & Scoping
 
-#### Record Usage
+### 1. Administrative Operations
+All admin endpoints (`/api/admin/*`, tenant CRUD `/api/tenants`) require administrative authentication via:
+- `Authorization: Bearer <ADMIN_API_KEY>` or
+- `x-admin-key: <ADMIN_API_KEY>`
+
+```bash
+# Example: List all tenants
+curl -H "Authorization: Bearer admin-secret-key" http://localhost:3000/api/admin/tenants
+```
+
+### 2. Tenant API Requests & Secure Scoping
+Billable and metering endpoints (`/api/usage`, `/api/generate`, `/api/invoices`) require a valid Tenant API key:
+- `Authorization: Bearer <API_KEY>` or
+- `x-api-key: <API_KEY>`
+
+**Tenant Scoping Guarantees**:
+- Unauthenticated requests receive `401 Unauthorized`.
+- Tenants can only view their own usage summaries and invoices. Attempts to view another tenant's data receive `403 Forbidden`.
+- Usage recorded via `/api/usage` is always tied strictly to the authenticated tenant.
+- A revoked API key immediately fails with `401 Unauthorized`.
+
+---
+
+## API-Key Lifecycle
+
+### Create API Key
 ```http
-POST /api/usage
+POST /api/tenants/:tenant_id/api-keys
+Authorization: Bearer <ADMIN_API_KEY>
 Content-Type: application/json
 
 {
-  "tenant_id": "uuid",
-  "usage_type": "api_call",
-  "quantity": 10,
-  "idempotency_key": "unique-key",
-  "metadata": {}
+  "name": "Production Key"
 }
 ```
+*Returns the plaintext key once (`sk_live_...`).*
 
-#### Get Usage Summary
+### List API Keys
 ```http
-GET /api/usage/:tenant_id
+GET /api/tenants/:tenant_id/api-keys
+Authorization: Bearer <API_KEY or ADMIN_API_KEY>
 ```
+*Lists key metadata (prefix, name, status, last_used_at, created_at, revoked_at) without leaking secret hashes.*
+
+### Rotate API Key
+```http
+POST /api/tenants/:tenant_id/api-keys/:key_id/rotate
+Authorization: Bearer <API_KEY or ADMIN_API_KEY>
+```
+*Atomically revokes the old key and generates a new active key.*
+
+### Revoke API Key
+```http
+DELETE /api/tenants/:tenant_id/api-keys/:key_id
+Authorization: Bearer <API_KEY or ADMIN_API_KEY>
+```
+*Immediately revokes the key. Subsequent requests using it will fail with `401 Unauthorized`.*
+
+---
+
+## API Endpoints Summary
+
+### Core Metering
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/usage` | Tenant API Key | Record usage event (idempotent) |
+| POST | `/api/generate` | Tenant API Key | Simulated billable AI generate endpoint |
+| GET | `/api/usage` | Tenant API Key | Get current tenant's usage summary |
+| GET | `/api/usage/:tenant_id` | Tenant (scoped) or Admin | Get usage summary |
+| GET | `/api/invoices` | Tenant API Key | Get current tenant's invoices |
+| GET | `/api/invoices/:tenant_id` | Tenant (scoped) or Admin | Get tenant invoices |
+
+### Administration
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/admin/tenants` | Admin Key | List tenants with usage & cost |
+| POST | `/api/admin/tenants` | Admin Key | Create tenant |
+| PUT | `/api/admin/tenants/:id` | Admin Key | Update tenant |
+| DELETE | `/api/admin/tenants/:id` | Admin Key | Delete tenant |
+| GET | `/api/admin/metrics` | Admin Key | Global metrics |
 
 ### Stripe Integration
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/stripe/checkout` | Create checkout session |
+| POST | `/api/stripe/upgrade` | Upgrade subscription |
+| POST | `/api/stripe/webhooks` | Verified webhook handler (raw body HMAC) |
 
-#### Create Checkout Session
-```http
-POST /api/stripe/checkout
-Content-Type: application/json
-
-{
-  "tenant_id": "uuid",
-  "plan_name": "Pro"
-}
-```
-
-#### Webhook Handler
-```http
-POST /api/stripe/webhooks
-Stripe-Signature: [signature]
-```
+---
 
 ## Testing
 
-Run the test suite:
+Run the full automated test suite:
 ```bash
 npm test
 ```
 
-Run tests in watch mode:
-```bash
-npm run test:watch
-```
-
 ### Test Coverage
-
-- Idempotency guarantees (no double-counting)
-- Quota boundary cases (at/under/over limits)
+- Administrative authentication and authorization (401 on unauthorized access)
+- Strict tenant data isolation and cross-tenant access rejection (403 on tenant mismatch)
+- API key creation, listing, rotation, and revocation guarantees
+- Exactly-once usage idempotency
+- Quota enforcement boundaries (402 on limit exceeded, 429 when at limit)
 - AI token pricing calculations
-- Webhook signature verification
-- Duplicate webhook prevention
-
-## Pricing Configuration
-
-The system uses integer arithmetic for all monetary calculations to avoid floating-point errors:
-
-### API Calls
-- Cost: 1 cent per API call
-
-### AI Tokens (per 1M tokens)
-- Input tokens: $0.30 (30 cents)
-- Cached input tokens: $0.10 (10 cents)
-- Output tokens: $0.60 (60 cents)
-- Reasoning tokens: $0.60 (60 cents, counted as output)
-
-## Stripe Webhook Testing
-
-Use the Stripe CLI to test webhooks locally:
-
-```bash
-# Forward webhooks to localhost
-stripe listen --forward-to localhost:3000/api/stripe/webhooks
-
-# Trigger test events
-stripe trigger checkout.session.completed
-stripe trigger customer.subscription.updated
-stripe trigger customer.subscription.deleted
-```
-
-## Database Schema
-
-### Tables
-- `plans`: Subscription plans with limits
-- `tenants`: Customer/tenant information
-- `subscriptions`: Stripe subscription records
-- `usage_events`: Usage records with idempotency keys
-
-### Key Constraints
-- Unique constraint on `(tenant_id, idempotency_key)` prevents duplicate usage events
-- Foreign key constraints ensure data integrity
-- Indexes on frequently queried columns
-
-## Correctness Guarantees
-
-### Idempotency
-- Every usage event is uniquely identified by `tenant_id + idempotency_key`
-- Duplicate requests return the original result without creating new charges
-- Tested with automated test suite
-
-### Quota Enforcement
-- Usage checked against plan limits before recording
-- Honest status codes: 429 (Too Many Requests) when at limit, 402 (Payment Required) when would exceed
-- Boundary conditions tested (at limit, just under, just over)
-
-### Money Math
-- All monetary values stored as integers (cents)
-- AI token pricing uses per-million rate calculations
-- Pricing constants pinned and covered by tests
-
-### Webhook Security
-- Stripe signature verification prevents forged events
-- Event deduplication prevents double-processing
-- Database transactions ensure atomic updates
-
-## Development
-
-### Project Structure
-```
-src/
-├── config/          # Database and pricing configuration
-├── controllers/     # Request handlers
-├── middleware/      # Express middleware
-├── routes/          # API route definitions
-├── services/        # Business logic
-├── app.js           # Express app setup
-└── server.js        # Server entry point
-
-tests/               # Test files
-schema.sql           # Database schema
-docker-compose.yml   # PostgreSQL setup
-```
-
-## License
-
-MIT
-
-## Built for FlyRank Backend Internship - Capstone Project
+- Stripe raw-body webhook signature verification
+- Optional Stripe initialization and configurable Price IDs

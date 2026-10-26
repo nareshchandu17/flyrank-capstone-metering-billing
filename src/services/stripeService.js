@@ -1,7 +1,36 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const pool = require('../config/database');
 
 class StripeService {
+  /**
+   * Helper to retrieve an initialized Stripe instance or null if not configured
+   */
+  getStripeClient() {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return null;
+    }
+    return require('stripe')(process.env.STRIPE_SECRET_KEY);
+  }
+
+  /**
+   * Check if Stripe integration is configured
+   */
+  isConfigured() {
+    return Boolean(process.env.STRIPE_SECRET_KEY);
+  }
+
+  /**
+   * Resolve configurable Stripe price ID for a given plan
+   * @param {string} planName - 'Free' or 'Pro'
+   * @returns {string|null} Stripe price ID
+   */
+  getPriceId(planName) {
+    const priceMap = {
+      'Free': process.env.STRIPE_PRICE_FREE || process.env.STRIPE_PRICE_FREE_ID || 'price_free_plan_id',
+      'Pro': process.env.STRIPE_PRICE_PRO || process.env.STRIPE_PRICE_PRO_ID || 'price_pro_plan_id'
+    };
+    return priceMap[planName] || null;
+  }
+
   /**
    * Create a Stripe checkout session for subscription
    * @param {string} tenantId - Tenant UUID
@@ -9,6 +38,13 @@ class StripeService {
    * @returns {Object} - Checkout session URL
    */
   async createCheckoutSession(tenantId, planName) {
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      const err = new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+      err.statusCode = 503;
+      throw err;
+    }
+
     try {
       // Get tenant info
       const tenantResult = await pool.query(
@@ -22,14 +58,7 @@ class StripeService {
       
       const tenant = tenantResult.rows[0];
       
-      // Define Stripe price IDs (these would be created in Stripe dashboard)
-      // For test mode, we'll use test price IDs
-      const priceIds = {
-        'Free': 'price_free_plan_id',
-        'Pro': 'price_pro_plan_id'
-      };
-      
-      const priceId = priceIds[planName];
+      const priceId = this.getPriceId(planName);
       if (!priceId) {
         throw new Error('Invalid plan name');
       }
@@ -92,6 +121,13 @@ class StripeService {
    * @returns {Object} - Result of upgrade
    */
   async upgradeSubscription(tenantId, newPlanName) {
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      const err = new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+      err.statusCode = 503;
+      throw err;
+    }
+
     try {
       // 1. Get tenant and their current subscription
       const tenantResult = await pool.query(
@@ -116,13 +152,7 @@ class StripeService {
       
       const subscription = subResult.rows[0];
       
-      // 2. Define Stripe price IDs
-      const priceIds = {
-        'Free': 'price_free_plan_id',
-        'Pro': 'price_pro_plan_id'
-      };
-      
-      const priceId = priceIds[newPlanName];
+      const priceId = this.getPriceId(newPlanName);
       if (!priceId) {
         throw new Error('Invalid plan name');
       }
@@ -173,14 +203,23 @@ class StripeService {
   /**
    * Handle Stripe webhook events
    * @param {string} signature - Stripe signature header
-   * @param {string} payload - Raw webhook payload
+   * @param {string|Buffer} payload - Raw webhook payload Buffer or string
    * @returns {Object} - Event processing result
    */
   async handleWebhook(signature, payload) {
+    const stripe = this.getStripeClient();
+    if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
+      return {
+        status: 'error',
+        message: 'Stripe is not configured. Please set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET.',
+        statusCode: 503
+      };
+    }
+
     let event;
     
     try {
-      // Verify webhook signature
+      // Verify webhook signature with raw payload Buffer/string
       event = stripe.webhooks.constructEvent(
         payload,
         signature,
@@ -230,12 +269,13 @@ class StripeService {
    */
   async handleCheckoutSessionCompleted(session) {
     const client = await pool.connect();
+    const stripe = this.getStripeClient();
     
     try {
       await client.query('BEGIN');
       
-      const tenantId = session.metadata.tenant_id;
-      const planName = session.metadata.plan_name;
+      const tenantId = session.metadata?.tenant_id;
+      const planName = session.metadata?.plan_name;
       
       // Check for duplicate event processing
       const existingSubscription = await client.query(
@@ -265,7 +305,10 @@ class StripeService {
       const planId = planResult.rows[0].id;
       
       // Get subscription details from Stripe
-      const subscription = await stripe.subscriptions.retrieve(session.subscription);
+      let subscription = { id: session.subscription, status: 'active', current_period_start: Math.floor(Date.now() / 1000), current_period_end: Math.floor(Date.now() / 1000) + 2592000 };
+      if (stripe && stripe.subscriptions && typeof stripe.subscriptions.retrieve === 'function') {
+        subscription = await stripe.subscriptions.retrieve(session.subscription);
+      }
       
       // Create subscription record
       await client.query(

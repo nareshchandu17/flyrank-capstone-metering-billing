@@ -1,27 +1,40 @@
+import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, 
   Plus, 
-  MoreVertical, 
-  Edit, 
-  Trash2,
+  MoreHorizontal, 
   Filter,
-  Download,
-  Shield,
+  ArrowUpRight,
+  TrendingUp,
+  Users,
   Building2,
-  Mail,
-  TrendingUp
+  Globe,
+  Calendar,
+  Zap,
+  Shield,
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  Crown,
+  Sparkles,
+  Edit,
+  Trash2,
+  Activity,
+  CreditCard
 } from 'lucide-react';
-import { getTenants, deleteTenant } from '../utils/api';
+import { api } from '../services/api';
 
 const Tenants = () => {
   const [tenants, setTenants] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedTenant, setSelectedTenant] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingTenant, setEditingTenant] = useState(null);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedTenant, setSelectedTenant] = useState(null);
+  const [upgrading, setUpgrading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchTenants();
@@ -29,311 +42,459 @@ const Tenants = () => {
 
   const fetchTenants = async () => {
     try {
-      const data = await getTenants();
-      setTenants(data);
-    } catch (error) {
-      console.error('Error fetching tenants:', error);
+      setLoading(true);
+      const response = await api.getTenants();
+      if (response.success) {
+        setTenants(response.data);
+        setError(null);
+      }
+    } catch (err) {
+      console.error('Failed to fetch tenants:', err);
+      setError('Failed to load tenants');
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredTenants = tenants.filter(tenant => {
-    const matchesSearch = tenant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         tenant.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || tenant.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this tenant?')) {
-      try {
-        await deleteTenant(id);
-        setTenants(tenants.filter(t => t.id !== id));
-      } catch (error) {
-        console.error('Error deleting tenant:', error);
+  const handleCreateTenant = async (tenantData) => {
+    try {
+      const response = await api.createTenant(tenantData);
+      if (response.success) {
+        await fetchTenants();
+        setShowAddModal(false);
       }
+    } catch (err) {
+      console.error('Failed to create tenant:', err);
+      alert('Failed to create tenant');
     }
   };
 
-  const getPlanColor = (plan) => {
-    const colors = {
-      enterprise: 'from-purple-500 to-pink-500',
-      pro: 'from-blue-500 to-cyan-500',
-      starter: 'from-green-500 to-emerald-500',
-      trial: 'from-orange-500 to-yellow-500',
-    };
-    return colors[plan] || 'from-gray-500 to-gray-600';
+  const handleUpdateTenant = async (tenantId, tenantData) => {
+    try {
+      const response = await api.updateTenant(tenantId, tenantData);
+      if (response.success) {
+        await fetchTenants();
+        setEditingTenant(null);
+      }
+    } catch (err) {
+      console.error('Failed to update tenant:', err);
+      alert('Failed to update tenant');
+    }
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      active: 'bg-green-500/10 text-green-400 border-green-500/20',
-      inactive: 'bg-red-500/10 text-red-400 border-red-500/20',
-      trial: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-    };
-    return colors[status] || 'bg-gray-500/10 text-gray-400 border-gray-500/20';
+  const handleDeleteTenant = async (tenantId) => {
+    if (!confirm('Are you sure you want to delete this tenant?')) return;
+    
+    try {
+      const response = await api.deleteTenant(tenantId);
+      if (response.success) {
+        await fetchTenants();
+      }
+    } catch (err) {
+      console.error('Failed to delete tenant:', err);
+      alert('Failed to delete tenant');
+    }
+  };
+
+  const handleUpgradePlan = async (tenantId, planId) => {
+    try {
+      setUpgrading(true);
+      const response = await api.createCheckoutSession(tenantId, planId);
+      if (response.success && response.data.checkout_url) {
+        window.location.href = response.data.checkout_url;
+      }
+    } catch (err) {
+      console.error('Checkout failed:', err);
+      alert('Checkout failed. Please try again.');
+    } finally {
+      setUpgrading(false);
+    }
+  };
+
+  const filteredTenants = tenants.filter(tenant =>
+    tenant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    tenant.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'active':
+        return <CheckCircle className="w-5 h-5 text-[#4ade80]" />;
+      case 'warning':
+        return <AlertTriangle className="w-5 h-5 text-[#fbbf24]" />;
+      case 'error':
+        return <XCircle className="w-5 h-5 text-[#f5576c]" />;
+      default:
+        return <CheckCircle className="w-5 h-5 text-[#4ade80]" />;
+    }
+  };
+
+  const getTierIcon = (tier) => {
+    switch (tier) {
+      case 'Enterprise':
+        return <Crown className="w-5 h-5 text-[#fbbf24]" />;
+      case 'Pro':
+        return <Sparkles className="w-5 h-5 text-[#667eea]" />;
+      default:
+        return <Users className="w-5 h-5 text-neutral-400" />;
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex items-center justify-center h-64">
+        <div className="text-neutral-400">Loading tenants...</div>
       </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-6"
-    >
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="flex items-center justify-between"
+      >
         <div>
-          <h1 className="text-4xl font-display font-bold mb-2">
-            Tenants
+          <h1 className="text-4xl font-display font-bold text-white mb-2">
+            Tenant Management
           </h1>
-          <p className="text-gray-400">Manage your customer accounts and subscriptions</p>
+          <p className="text-neutral-400">Manage all your customers and their usage patterns</p>
         </div>
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setShowAddModal(true)}
-          className="btn-primary flex items-center gap-2"
+          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white rounded-xl font-medium shadow-lg shadow-[#667eea]/30"
         >
           <Plus className="w-5 h-5" />
-          Add Tenant
+          <span>Add Tenant</span>
         </motion.button>
-      </div>
+      </motion.div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Stats Row */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
-          { label: 'Total Tenants', value: tenants.length, icon: Building2, color: 'from-primary-500 to-blue-500' },
-          { label: 'Active', value: tenants.filter(t => t.status === 'active').length, icon: Shield, color: 'from-green-500 to-emerald-500' },
-          { label: 'Trial', value: tenants.filter(t => t.status === 'trial').length, icon: TrendingUp, color: 'from-orange-500 to-yellow-500' },
-        ].map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <motion.div
-              key={stat.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              className="metric-card"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.color} flex items-center justify-center`}>
-                  <Icon className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <div className="text-2xl font-display font-bold text-white">{stat.value}</div>
-                  <div className="text-gray-400 text-sm">{stat.label}</div>
-                </div>
+          { label: 'Total Tenants', value: tenants.length, icon: Users, gradient: 'from-[#667eea] to-[#764ba2]' },
+          { label: 'Active', value: tenants.filter(t => t.plan_name !== 'Free').length, icon: CheckCircle, gradient: 'from-[#4ade80] to-[#38f9d7]' },
+          { label: 'Monthly Events', value: tenants.reduce((sum, t) => sum + (parseInt(t.monthly_events) || 0), 0).toLocaleString(), icon: Activity, gradient: 'from-[#fbbf24] to-[#f59e0b]' },
+          { label: 'Total Events', value: tenants.reduce((sum, t) => sum + (parseInt(t.total_events) || 0), 0).toLocaleString(), icon: TrendingUp, gradient: 'from-[#f093fb] to-[#f5576c]' },
+        ].map((stat, index) => (
+          <motion.div
+            key={stat.label}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.1 }}
+            whileHover={{ y: -5, scale: 1.02 }}
+            className="group relative"
+          >
+            <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 p-6 overflow-hidden">
+              <div className={`absolute inset-0 bg-gradient-to-br ${stat.gradient} opacity-0 group-hover:opacity-10 transition-opacity duration-300`} />
+              <div className="relative z-10">
+                <stat.icon className={`w-6 h-6 mb-3 bg-gradient-to-br ${stat.gradient} bg-clip-text text-transparent`} />
+                <div className="text-2xl font-display font-bold text-white mb-1">{stat.value}</div>
+                <div className="text-sm text-neutral-400">{stat.label}</div>
               </div>
-            </motion.div>
-          );
-        })}
+            </div>
+          </motion.div>
+        ))}
       </div>
 
-      {/* Filters */}
-      <div className="glass-card p-4 flex flex-col lg:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+      {/* Search and Filters */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="flex items-center gap-4"
+      >
+        <div className="flex-1 relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
           <input
             type="text"
             placeholder="Search tenants..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-field pl-12"
+            className="w-full pl-12 pr-4 py-3 bg-[#0a0a0a]/50 backdrop-blur-xl border border-white/5 rounded-xl text-white placeholder-neutral-400 focus:outline-none focus:border-[#667eea]/50 transition-all"
           />
-        </div>
-        <div className="flex gap-2">
-          {['all', 'active', 'trial', 'inactive'].map((status) => (
-            <motion.button
-              key={status}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setFilterStatus(status)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filterStatus === status
-                  ? 'bg-gradient-to-r from-primary-600 to-accent-600 text-white'
-                  : 'bg-white/5 text-gray-400 hover:bg-white/10'
-              }`}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </motion.button>
-          ))}
         </div>
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="btn-secondary flex items-center gap-2"
+          className="flex items-center gap-2 px-4 py-3 bg-[#0a0a0a]/50 backdrop-blur-xl border border-white/5 rounded-xl text-white hover:border-white/10 transition-all"
         >
-          <Download className="w-4 h-4" />
-          Export
+          <Filter className="w-5 h-5" />
+          <span>Filters</span>
         </motion.button>
-      </div>
+      </motion.div>
 
-      {/* Tenants Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <AnimatePresence>
+      {/* Tenant List */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="relative"
+      >
+        <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 overflow-hidden">
+          {/* Table Header */}
+          <div className="grid grid-cols-12 gap-4 p-6 border-b border-white/5">
+            <div className="col-span-3 text-sm font-medium text-neutral-400">Tenant</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Plan</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Usage</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Total Events</div>
+            <div className="col-span-2 text-sm font-medium text-neutral-400">Status</div>
+            <div className="col-span-1 text-sm font-medium text-neutral-400">Actions</div>
+          </div>
+
+          {/* Table Rows */}
           {filteredTenants.map((tenant, index) => (
             <motion.div
               key={tenant.id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ duration: 0.3, delay: index * 0.05 }}
-              whileHover={{ scale: 1.02, y: -5 }}
-              className="glass-card-light p-6 group cursor-pointer"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.5 + index * 0.1 }}
+              whileHover={{ x: 5, backgroundColor: 'rgba(255,255,255,0.03)' }}
+              className="grid grid-cols-12 gap-4 p-6 border-b border-white/5 last:border-0 transition-all cursor-pointer group"
             >
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-xl font-bold">
+              {/* Tenant Info */}
+              <div className="col-span-3 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white font-bold">
                   {tenant.name.charAt(0)}
                 </div>
-                <div className="relative">
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-                  >
-                    <MoreVertical className="w-5 h-5 text-gray-400" />
-                  </motion.button>
-                </div>
-              </div>
-
-              <h3 className="text-xl font-display font-semibold text-white mb-1">
-                {tenant.name}
-              </h3>
-              <div className="flex items-center gap-2 text-gray-400 text-sm mb-4">
-                <Mail className="w-4 h-4" />
-                {tenant.email}
-              </div>
-
-              <div className="flex items-center gap-2 mb-4">
-                <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(tenant.status)}`}>
-                  {tenant.status.charAt(0).toUpperCase() + tenant.status.slice(1)}
-                </span>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r ${getPlanColor(tenant.plan)} text-white`}>
-                  {tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1)}
-                </span>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Usage</span>
-                  <span className="text-white font-medium">{tenant.usage}%</span>
-                </div>
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${tenant.usage}%` }}
-                    transition={{ duration: 1, delay: index * 0.1 }}
-                    className={`h-full bg-gradient-to-r ${getPlanColor(tenant.plan)}`}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-white/10 flex justify-between items-center">
                 <div>
-                  <div className="text-gray-400 text-xs">Monthly Cost</div>
-                  <div className="text-white font-semibold">${tenant.cost}</div>
+                  <div className="text-white font-medium mb-1">{tenant.name}</div>
+                  <div className="text-xs text-neutral-500">{tenant.email}</div>
                 </div>
-                <div className="flex gap-2">
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    className="p-2 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition-colors"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => handleDelete(tenant.id)}
-                    className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </motion.button>
-                </div>
+              </div>
+
+              {/* Plan */}
+              <div className="col-span-2 flex items-center gap-2">
+                {getTierIcon(tenant.plan_name)}
+                <span className="text-white">{tenant.plan_name}</span>
+              </div>
+
+              {/* Usage */}
+              <div className="col-span-2 flex items-center">
+                <span className="text-white">{tenant.monthly_events || 0}</span>
+              </div>
+
+              {/* Total Events */}
+              <div className="col-span-2 flex items-center">
+                <span className="text-white">{tenant.total_events || 0}</span>
+              </div>
+
+              {/* Status */}
+              <div className="col-span-2 flex items-center">
+                {getStatusIcon('active')}
+              </div>
+
+              {/* Actions */}
+              <div className="col-span-1 flex items-center gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setEditingTenant(tenant)}
+                  className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+                >
+                  <Edit className="w-4 h-4 text-neutral-400" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => {
+                    setSelectedTenant(tenant);
+                    setShowUpgradeModal(true);
+                  }}
+                  className="p-2 rounded-lg hover:bg-[#667eea]/10 transition-colors"
+                >
+                  <CreditCard className="w-4 h-4 text-[#667eea]" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => handleDeleteTenant(tenant.id)}
+                  className="p-2 rounded-lg hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 text-red-400" />
+                </motion.button>
               </div>
             </motion.div>
           ))}
-        </AnimatePresence>
-      </div>
+        </div>
+      </motion.div>
 
       {/* Add Tenant Modal */}
-      <AnimatePresence>
-        {showAddModal && (
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={() => setShowAddModal(false)}
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-[#0a0a0a] rounded-3xl border border-white/10 p-8 w-full max-w-md"
           >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-              className="glass-card p-8 w-full max-w-md"
-            >
-              <h2 className="text-2xl font-display font-bold text-white mb-6">
-                Add New Tenant
-              </h2>
-              <form className="space-y-4">
+            <h2 className="text-2xl font-display font-bold text-white mb-6">Add New Tenant</h2>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              handleCreateTenant({
+                name: formData.get('name'),
+                email: formData.get('email'),
+                plan_id: 1
+              });
+            }}>
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Company Name
-                  </label>
-                  <input type="text" className="input-field" placeholder="Acme Corp" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Email
-                  </label>
-                  <input type="email" className="input-field" placeholder="billing@acme.com" />
+                  <label className="text-sm text-neutral-400 mb-2 block">Name</label>
+                  <input
+                    name="name"
+                    type="text"
+                    required
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#667eea]/50"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Plan
-                  </label>
-                  <select className="input-field">
-                    <option value="starter">Starter</option>
-                    <option value="pro">Pro</option>
-                    <option value="enterprise">Enterprise</option>
-                  </select>
+                  <label className="text-sm text-neutral-400 mb-2 block">Email</label>
+                  <input
+                    name="email"
+                    type="email"
+                    required
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#667eea]/50"
+                  />
                 </div>
-                <div className="flex gap-4 pt-4">
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className="btn-secondary flex-1"
-                  >
-                    Cancel
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    type="submit"
-                    className="btn-primary flex-1"
-                  >
-                    Add Tenant
-                  </motion.button>
-                </div>
-              </form>
-            </motion.div>
+              </div>
+              <div className="flex gap-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 px-4 py-3 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-[#667eea] to-[#764ba2] rounded-xl text-white font-medium"
+                >
+                  Create Tenant
+                </button>
+              </div>
+            </form>
           </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+        </div>
+      )}
+
+      {/* Edit Tenant Modal */}
+      {editingTenant && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-[#0a0a0a] rounded-3xl border border-white/10 p-8 w-full max-w-md"
+          >
+            <h2 className="text-2xl font-display font-bold text-white mb-6">Edit Tenant</h2>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              handleUpdateTenant(editingTenant.id, {
+                name: formData.get('name'),
+                email: formData.get('email'),
+              });
+            }}>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-neutral-400 mb-2 block">Name</label>
+                  <input
+                    name="name"
+                    type="text"
+                    defaultValue={editingTenant.name}
+                    required
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#667eea]/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-neutral-400 mb-2 block">Email</label>
+                  <input
+                    name="email"
+                    type="email"
+                    defaultValue={editingTenant.email}
+                    required
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#667eea]/50"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setEditingTenant(null)}
+                  className="flex-1 px-4 py-3 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-[#667eea] to-[#764ba2] rounded-xl text-white font-medium"
+                >
+                  Update Tenant
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Upgrade Plan Modal */}
+      {showUpgradeModal && selectedTenant && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-[#0a0a0a] rounded-3xl border border-white/10 p-8 w-full max-w-lg"
+          >
+            <h2 className="text-2xl font-display font-bold text-white mb-2">Upgrade Plan</h2>
+            <p className="text-neutral-400 mb-6">Upgrade {selectedTenant.name} to a higher tier</p>
+            
+            <div className="space-y-4">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => handleUpgradePlan(selectedTenant.id, 2)}
+                disabled={upgrading}
+                className="w-full p-6 rounded-2xl bg-gradient-to-r from-[#667eea] to-[#764ba2] border border-white/10 hover:border-[#667eea]/30 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-left">
+                    <div className="text-white font-bold text-xl">Pro Plan</div>
+                    <div className="text-neutral-300 text-sm">$29/month</div>
+                  </div>
+                  <Sparkles className="w-6 h-6 text-white" />
+                </div>
+              </motion.button>
+              
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                disabled={upgrading}
+                className="w-full p-6 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-left">
+                    <div className="text-white font-bold text-xl">Free Plan</div>
+                    <div className="text-neutral-300 text-sm">$0/month</div>
+                  </div>
+                  <Users className="w-6 h-6 text-neutral-400" />
+                </div>
+              </motion.button>
+            </div>
+            
+            <button
+              onClick={() => setShowUpgradeModal(false)}
+              className="w-full mt-6 px-4 py-3 bg-white/5 rounded-xl text-white hover:bg-white/10 transition-colors"
+            >
+              Cancel
+            </button>
+          </motion.div>
+        </div>
+      )}
+    </div>
   );
 };
 
