@@ -14,29 +14,39 @@ const getTransactions = async (req, res) => {
       JOIN tenants t ON ue.tenant_id = t.id
       LEFT JOIN plans p ON t.plan_id = p.id
     `;
-    const params = [];
-    const paramCount = [];
+    const { calculateAITokenCost, calculateAPICallCost } = require('../config/pricing');
+    const effectiveTenantId = req.isAdmin ? tenant_id : (req.tenantId || tenant_id);
 
-    if (tenant_id) {
+    if (effectiveTenantId) {
       query += ' WHERE ue.tenant_id = $1';
-      params.push(tenant_id);
+      params.push(effectiveTenantId);
       paramCount.push(1);
     }
 
     query += ' ORDER BY ue.created_at DESC LIMIT $' + (paramCount.length + 1) + ' OFFSET $' + (paramCount.length + 2);
-    params.push(limit, offset);
+    params.push(parseInt(limit, 10), parseInt(offset, 10));
 
     const result = await db.query(query, params);
 
-    // Map usage_type to event_type for frontend compatibility
-    const mappedData = result.rows.map(row => ({
-      ...row,
-      event_type: row.usage_type,
-      type: row.usage_type === 'api_call' ? 'usage' : row.usage_type === 'ai_tokens' ? 'payment' : 'usage',
-      status: 'completed',
-      amount: row.usage_type === 'ai_tokens' ? `$${(row.quantity * 0.0003).toFixed(2)}` : '$0.00',
-      description: `${row.usage_type === 'api_call' ? 'API' : 'AI Token'} usage event`
-    }));
+    // Map usage_type to event_type with exact calculated costs
+    const mappedData = result.rows.map(row => {
+      let costCents = 0;
+      if (row.usage_type === 'api_call') {
+        costCents = calculateAPICallCost(parseInt(row.quantity, 10));
+      } else if (row.usage_type === 'ai_tokens') {
+        const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {});
+        costCents = calculateAITokenCost(metadata.input_tokens ? metadata : { input_tokens: parseInt(row.quantity, 10) }, { exact: true });
+      }
+
+      return {
+        ...row,
+        event_type: row.usage_type,
+        type: 'usage',
+        status: 'completed',
+        amount: `$${(costCents / 100).toFixed(4)}`,
+        description: `${row.usage_type === 'api_call' ? 'API Call' : 'AI Token'} usage event (${parseInt(row.quantity, 10).toLocaleString()} units)`
+      };
+    });
 
     res.json({ success: true, data: mappedData });
   } catch (error) {
@@ -49,6 +59,7 @@ const getTransactions = async (req, res) => {
 const getInvoices = async (req, res) => {
   try {
     const { tenant_id } = req.query;
+    const effectiveTenantId = req.isAdmin ? tenant_id : (req.tenantId || tenant_id);
 
     let query = `
       SELECT 
@@ -59,9 +70,9 @@ const getInvoices = async (req, res) => {
     `;
     const params = [];
 
-    if (tenant_id) {
+    if (effectiveTenantId) {
       query += ' WHERE i.tenant_id = $1';
-      params.push(tenant_id);
+      params.push(effectiveTenantId);
     }
 
     query += ' ORDER BY i.created_at DESC';

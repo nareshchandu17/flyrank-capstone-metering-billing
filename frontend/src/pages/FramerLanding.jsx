@@ -78,13 +78,14 @@ const FramerLanding = () => {
 
   const handleTriggerSimEvent = () => {
     if (isSimulatingEvent) return;
-    setIsSimulatingEvent(true);
+    const tokenCount = 4500;
+    const exactCost = `$${((tokenCount * 0.60) / 1000000).toFixed(4)}`;
     const newEvent = {
       id: Date.now(),
       tenant: 'HyperScale Corp',
       type: 'ai_tokens',
-      tokens: Math.floor(Math.random() * 8000) + 2000,
-      cost: `$${(Math.random() * 0.005 + 0.001).toFixed(4)}`,
+      tokens: tokenCount,
+      cost: exactCost,
       time: 'Just now'
     };
     setSimEvents(prev => [newEvent, ...prev.slice(0, 3)]);

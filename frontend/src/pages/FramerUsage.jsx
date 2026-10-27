@@ -122,8 +122,9 @@ const FramerUsage = () => {
     }
 
     try {
-      setSimulating(true);
-      const idempotencyKey = `sim-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const idempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID 
+        ? `sim-${crypto.randomUUID()}` 
+        : `sim-${Date.now()}-${performance.now().toString(36)}`;
       const payload = {
         tenant_id: simTenantId,
         usage_type: simType,

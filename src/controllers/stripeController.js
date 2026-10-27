@@ -15,6 +15,14 @@ class StripeController {
           error: 'Missing required fields: tenant_id, plan_name'
         });
       }
+
+      // Enforce tenant scoping if authenticated as tenant
+      if (!req.isAdmin && req.tenantId && req.tenantId !== tenant_id) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only manage Stripe billing for your own tenant'
+        });
+      }
       
       // Validate plan name
       if (!['Free', 'Pro'].includes(plan_name)) {
@@ -49,6 +57,14 @@ class StripeController {
       if (!tenant_id || !new_plan_name) {
         return res.status(400).json({
           error: 'Missing required fields: tenant_id, new_plan_name'
+        });
+      }
+
+      // Enforce tenant scoping if authenticated as tenant
+      if (!req.isAdmin && req.tenantId && req.tenantId !== tenant_id) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only manage Stripe billing for your own tenant'
         });
       }
       

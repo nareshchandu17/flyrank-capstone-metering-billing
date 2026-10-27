@@ -24,13 +24,12 @@ const getDashboardStats = async (req, res) => {
     `);
     const monthlyUsage = parseInt(usageResult.rows[0].count);
 
-    // Get total revenue (simulated - in real app, this would come from Stripe)
+    // Calculate real revenue from database invoices
     const revenueResult = await db.query(`
-      SELECT COUNT(*) * 29 as revenue
-      FROM subscriptions
-      WHERE status = 'active'
+      SELECT COALESCE(SUM(amount_cents), 0) as total_cents
+      FROM invoices
     `);
-    const totalRevenue = parseInt(revenueResult.rows[0].revenue || 0);
+    const totalRevenue = parseFloat(((parseInt(revenueResult.rows[0].total_cents, 10)) / 100).toFixed(2));
 
     // Get recent activity
     const recentActivityResult = await db.query(`
