@@ -2,21 +2,18 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getSettings, saveSettings, reconcileSubscriptions } from '../utils/api';
 import { 
-  Settings as SettingsIcon, 
   Key, 
   CreditCard, 
   Bell, 
   Sliders, 
   Save, 
   CheckCircle, 
-  AlertTriangle, 
+  XCircle, 
   Eye, 
   EyeOff, 
   RotateCw, 
   ShieldCheck,
-  RefreshCw,
-  Zap,
-  Globe
+  RotateCcw
 } from 'lucide-react';
 
 const FramerSettings = () => {
@@ -51,7 +48,7 @@ const FramerSettings = () => {
     setSaving(true);
     try {
       saveSettings(settings);
-      showToast('Settings saved successfully! Changes active immediately.');
+      showToast('Settings saved successfully. Changes active immediately.');
     } catch (err) {
       showToast('Failed to save settings.', 'error');
     } finally {
@@ -63,7 +60,7 @@ const FramerSettings = () => {
     setTestingStripe(true);
     try {
       const res = await reconcileSubscriptions();
-      showToast(`Stripe test connection verified! Processed ${res.total_tenants || 0} customer subscriptions.`);
+      showToast(`Stripe test connection verified. Processed ${res.total_tenants || 0} subscriptions.`);
     } catch (err) {
       console.error('Stripe test failed:', err);
       showToast(err.response?.data?.error || 'Stripe connection test failed', 'error');
@@ -86,7 +83,7 @@ const FramerSettings = () => {
     };
     setSettings(defaults);
     saveSettings(defaults);
-    showToast('Settings reset to defaults.');
+    showToast('Settings reset to system defaults.');
   };
 
   return (
@@ -95,79 +92,77 @@ const FramerSettings = () => {
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl ${
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl border shadow-stripi-2 flex items-center gap-3 backdrop-blur-xl ${
               toast.type === 'error' 
-                ? 'bg-red-950/80 border-red-500/30 text-red-200' 
-                : 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+                ? 'bg-white border-[#ea2261]/30 text-[#ea2261]' 
+                : 'bg-white border-emerald-500/30 text-emerald-800'
             }`}
           >
             {toast.type === 'error' ? (
-              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <XCircle className="w-4 h-4 text-[#ea2261]" />
             ) : (
-              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              <CheckCircle className="w-4 h-4 text-emerald-600" />
             )}
-            <span className="text-sm font-medium">{toast.message}</span>
+            <span className="text-xs font-medium text-[#0d253d]">{toast.message}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-      >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-display font-bold text-white tracking-tight">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="pill-tag-soft">Platform Configuration</span>
+            <span className="text-[11px] text-[#64748d]">Live Synchronized Settings</span>
+          </div>
+          <h1 className="font-display-lg text-[#0d253d]">
             Engine Settings
           </h1>
-          <p className="text-neutral-400 mt-1">
-            Configured parameters backed by active save, update, and authentication operations.
+          <p className="font-body-md text-[#64748d] mt-1">
+            Authentication secrets, Stripe price mapping, quota thresholds, and polling frequencies.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
           <button
             type="button"
             onClick={handleResetDefaults}
-            className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 text-xs font-semibold transition-all"
+            className="btn-secondary-pill"
           >
-            Reset Defaults
+            <RotateCcw className="w-3.5 h-3.5 mr-1 text-[#64748d]" />
+            <span>Reset Defaults</span>
           </button>
+          
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] hover:opacity-90 text-white font-medium text-sm shadow-lg shadow-[#667eea]/20 transition-all"
+            className="btn-primary-pill"
           >
-            <Save className="w-4 h-4" />
+            <Save className="w-4 h-4 mr-1.5" />
             <span>{saving ? 'Saving...' : 'Save Settings'}</span>
           </button>
         </div>
-      </motion.div>
+      </div>
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* SECTION 1: AUTHENTICATION */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
-        >
-          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white shadow-md">
+        <div className="card-stripi space-y-4">
+          <div className="flex items-center gap-3 pb-3 border-b border-[#e3e8ee]">
+            <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
               <Key className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Administrative Authentication</h2>
-              <p className="text-xs text-neutral-400">Master key used for administrative routes and tenant management</p>
+              <h2 className="font-heading-sm text-[#0d253d]">Administrative Authentication</h2>
+              <p className="text-xs text-[#64748d]">Master credential used for administrative routes and tenant provisioning</p>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-              Admin API Key (ADMIN_API_KEY)
+            <label className="block text-xs font-medium text-[#273951] mb-1.5">
+              Admin API Key (<span className="font-mono text-[11px] text-[#533afd]">ADMIN_API_KEY</span>)
             </label>
             <div className="relative">
               <input
@@ -175,37 +170,32 @@ const FramerSettings = () => {
                 required
                 value={settings.adminApiKey}
                 onChange={(e) => setSettings({ ...settings, adminApiKey: e.target.value })}
-                className="w-full pl-4 pr-12 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#667eea]"
+                className="text-input-stripi w-full pr-12 font-mono text-sm"
               />
               <button
                 type="button"
                 onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#64748d] hover:text-[#0d253d]"
               >
                 {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-[11px] text-neutral-500 mt-1">
-              Passed via Authorization: Bearer &lt;key&gt; header to access administrative endpoints.
+            <p className="text-[11px] text-[#64748d] mt-1.5">
+              Transmitted via <code className="font-mono text-[#0d253d] bg-[#f6f9fc] px-1 py-0.5 rounded text-[11px]">Authorization: Bearer &lt;key&gt;</code> to access administrative engine endpoints.
             </p>
           </div>
-        </motion.div>
+        </div>
 
         {/* SECTION 2: STRIPE TEST-MODE CONFIGURATION */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
-        >
-          <div className="flex items-center justify-between pb-3 border-b border-white/5">
+        <div className="card-stripi space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#e3e8ee]">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#f093fb] to-[#f5576c] flex items-center justify-center text-white shadow-md">
+              <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
                 <CreditCard className="w-4 h-4" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">Stripe Test-Mode & Reconciliation</h2>
-                <p className="text-xs text-neutral-400">Live subscription billing and price ID mappings</p>
+                <h2 className="font-heading-sm text-[#0d253d]">Stripe Test-Mode & Reconciliation</h2>
+                <p className="text-xs text-[#64748d]">Subscription recurring price identifiers and state reconciliation</p>
               </div>
             </div>
 
@@ -213,43 +203,43 @@ const FramerSettings = () => {
               type="button"
               onClick={handleTestStripe}
               disabled={testingStripe}
-              className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-white flex items-center gap-1.5 transition-colors"
+              className="btn-secondary-pill text-xs py-1.5 px-3"
             >
-              <RotateCw className={`w-3.5 h-3.5 text-[#f093fb] ${testingStripe ? 'animate-spin' : ''}`} />
-              <span>{testingStripe ? 'Testing...' : 'Test & Reconcile'}</span>
+              <RotateCw className={`w-3.5 h-3.5 mr-1.5 text-[#533afd] ${testingStripe ? 'animate-spin' : ''}`} />
+              <span>{testingStripe ? 'Testing...' : 'Test Connection'}</span>
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-                Pro Plan Price ID (STRIPE_PRICE_PRO)
+              <label className="block text-xs font-medium text-[#273951] mb-1">
+                Pro Plan Price ID (<span className="font-mono text-[11px] text-[#533afd]">STRIPE_PRICE_PRO</span>)
               </label>
               <input
                 type="text"
                 value={settings.stripePricePro}
                 onChange={(e) => setSettings({ ...settings, stripePricePro: e.target.value })}
-                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#667eea]"
+                className="text-input-stripi w-full font-mono text-xs"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1.5">
-                Free Plan Price ID (STRIPE_PRICE_FREE)
+              <label className="block text-xs font-medium text-[#273951] mb-1">
+                Free Plan Price ID (<span className="font-mono text-[11px] text-[#533afd]">STRIPE_PRICE_FREE</span>)
               </label>
               <input
                 type="text"
                 value={settings.stripePriceFree}
                 onChange={(e) => setSettings({ ...settings, stripePriceFree: e.target.value })}
-                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#667eea]"
+                className="text-input-stripi w-full font-mono text-xs"
               />
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
+          <div className="p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-white">Nightly Automated Reconciliation</div>
-              <div className="text-[11px] text-neutral-400">Nightly cron job catches missed webhooks and syncs DB</div>
+              <div className="text-xs font-semibold text-[#0d253d]">Nightly Automated Reconciliation</div>
+              <div className="text-[11px] text-[#64748d]">Periodic sync verifies local database state against Stripe subscription objects</div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -258,33 +248,28 @@ const FramerSettings = () => {
                 onChange={(e) => setSettings({ ...settings, autoReconcile: e.target.checked })}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#667eea]"></div>
+              <div className="w-10 h-5 bg-[#e3e8ee] peer-focus:outline-none rounded-pill peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-pill after:h-4 after:w-4 after:transition-all peer-checked:bg-[#533afd]"></div>
             </label>
           </div>
-        </motion.div>
+        </div>
 
         {/* SECTION 3: USAGE ALERTS & QUOTAS */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
-        >
-          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#4facfe] to-[#00f2fe] flex items-center justify-center text-white shadow-md">
+        <div className="card-stripi space-y-4">
+          <div className="flex items-center gap-3 pb-3 border-b border-[#e3e8ee]">
+            <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
               <Bell className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Deduplicated Usage Alerts</h2>
-              <p className="text-xs text-neutral-400">Threshold alerts deduplicated per tenant, billing period, and metric type</p>
+              <h2 className="font-heading-sm text-[#0d253d]">Deduplicated Usage Alerts & Quota Caps</h2>
+              <p className="text-xs text-[#64748d]">Threshold dispatch deduplicated per tenant, billing period, and metric type</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-medium text-neutral-300">Warning Alert Threshold</label>
-                <span className="text-xs font-mono font-bold text-[#818cf8]">{settings.alertThresholdPercent}%</span>
+                <label className="text-xs font-medium text-[#273951]">Warning Alert Threshold</label>
+                <span className="font-body-tabular text-xs font-semibold text-[#533afd] tnum">{settings.alertThresholdPercent}%</span>
               </div>
               <input
                 type="range"
@@ -293,15 +278,15 @@ const FramerSettings = () => {
                 step="5"
                 value={settings.alertThresholdPercent}
                 onChange={(e) => setSettings({ ...settings, alertThresholdPercent: parseInt(e.target.value, 10) })}
-                className="w-full accent-[#667eea] bg-white/10 h-2 rounded-lg cursor-pointer"
+                className="w-full accent-[#533afd] bg-[#e3e8ee] h-1.5 rounded-lg cursor-pointer"
               />
-              <p className="text-[11px] text-neutral-500 mt-1">Dispatches deduplicated alert when tenant reaches this quota %.</p>
+              <p className="text-[11px] text-[#64748d] mt-1.5">Dispatches single deduplicated alert when monthly usage crosses this mark.</p>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-medium text-neutral-300">Critical Cap Threshold</label>
-                <span className="text-xs font-mono font-bold text-red-400">{settings.criticalThresholdPercent}%</span>
+                <label className="text-xs font-medium text-[#273951]">Critical Hard Cap Threshold</label>
+                <span className="font-body-tabular text-xs font-semibold text-[#ea2261] tnum">{settings.criticalThresholdPercent}%</span>
               </div>
               <input
                 type="range"
@@ -310,37 +295,32 @@ const FramerSettings = () => {
                 step="5"
                 value={settings.criticalThresholdPercent}
                 onChange={(e) => setSettings({ ...settings, criticalThresholdPercent: parseInt(e.target.value, 10) })}
-                className="w-full accent-[#f5576c] bg-white/10 h-2 rounded-lg cursor-pointer"
+                className="w-full accent-[#ea2261] bg-[#e3e8ee] h-1.5 rounded-lg cursor-pointer"
               />
-              <p className="text-[11px] text-neutral-500 mt-1">Rejects requests for non-overage plans when 100% is reached.</p>
+              <p className="text-[11px] text-[#64748d] mt-1.5">Rejects incoming events with HTTP 429 once strict non-overage plans reach 100%.</p>
             </div>
           </div>
-        </motion.div>
+        </div>
 
         {/* SECTION 4: DISPLAY PREFERENCES */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
-        >
-          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#43e97b] to-[#38f9d7] flex items-center justify-center text-white shadow-md">
+        <div className="card-stripi space-y-4">
+          <div className="flex items-center gap-3 pb-3 border-b border-[#e3e8ee]">
+            <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
               <Sliders className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Display & Telemetry Polling</h2>
-              <p className="text-xs text-neutral-400">Polling frequency and currency formatting</p>
+              <h2 className="font-heading-sm text-[#0d253d]">Display & Telemetry Polling</h2>
+              <p className="text-xs text-[#64748d]">Polling interval and currency representation</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1.5">Currency Display</label>
+              <label className="block text-xs font-medium text-[#273951] mb-1">Currency Display</label>
               <select
                 value={settings.currency}
                 onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
-                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                className="text-input-stripi w-full"
               >
                 <option value="USD">USD ($) - Default</option>
                 <option value="EUR">EUR (€)</option>
@@ -349,29 +329,29 @@ const FramerSettings = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1.5">Live Polling Interval (Seconds)</label>
+              <label className="block text-xs font-medium text-[#273951] mb-1">Live Polling Interval</label>
               <select
                 value={settings.pollIntervalSeconds}
                 onChange={(e) => setSettings({ ...settings, pollIntervalSeconds: parseInt(e.target.value, 10) })}
-                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                className="text-input-stripi w-full"
               >
-                <option value="15">15 Seconds (Rapid Telemetry)</option>
-                <option value="30">30 Seconds (Standard)</option>
-                <option value="60">60 Seconds (Low Bandwidth)</option>
+                <option value="15">15 Seconds (Real-Time Telemetry)</option>
+                <option value="30">30 Seconds (Balanced Standard)</option>
+                <option value="60">60 Seconds (Low Network Footprint)</option>
               </select>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        {/* Submit Button */}
+        {/* Submit Bar */}
         <div className="flex justify-end pt-2">
           <button
             type="submit"
             disabled={saving}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white font-semibold text-sm hover:opacity-90 transition-opacity shadow-lg shadow-[#667eea]/20"
+            className="btn-primary-pill"
           >
-            <Save className="w-4 h-4" />
-            <span>{saving ? 'Saving Changes...' : 'Save Settings'}</span>
+            <Save className="w-4 h-4 mr-1.5" />
+            <span>{saving ? 'Saving...' : 'Save Settings'}</span>
           </button>
         </div>
       </form>

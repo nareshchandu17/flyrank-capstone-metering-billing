@@ -15,15 +15,11 @@ import {
   Search, 
   Plus, 
   Users, 
-  CheckCircle, 
+  CheckCircle2, 
   AlertTriangle, 
-  XCircle, 
-  Crown, 
-  Sparkles, 
   X, 
   Trash2, 
   Edit2, 
-  Eye, 
   Key, 
   Copy, 
   Check, 
@@ -33,7 +29,7 @@ import {
   Activity,
   Layers,
   Zap,
-  ExternalLink
+  ArrowRight
 } from 'lucide-react';
 
 const FramerTenants = () => {
@@ -100,16 +96,40 @@ const FramerTenants = () => {
         getTenantUsage(tenant.id).catch(() => null),
         getApiKeys(tenant.id).catch(() => [])
       ]);
+
       setTenantUsage(usageData);
       setTenantKeys(keysData || []);
     } catch (err) {
-      console.error('Error fetching inspect details:', err);
+      console.error('Error fetching tenant details:', err);
     } finally {
       setLoadingKeys(false);
     }
   };
 
-  // Open Edit Modal
+  // Create new tenant
+  const handleCreateTenant = async (e) => {
+    e.preventDefault();
+    if (!newTenant.name || !newTenant.email) {
+      showToast('Name and email are required', 'error');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await createTenant(newTenant);
+      showToast(`Tenant "${newTenant.name}" created successfully`);
+      setIsCreateOpen(false);
+      setNewTenant({ name: '', email: '', plan: 'Free' });
+      fetchTenants();
+    } catch (error) {
+      console.error('Error creating tenant:', error);
+      showToast(error.message || 'Failed to create tenant', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Edit tenant
   const handleOpenEdit = (tenant) => {
     setActiveTenant(tenant);
     setEditForm({
@@ -121,557 +141,507 @@ const FramerTenants = () => {
     setIsEditOpen(true);
   };
 
-  // Create Tenant Submit
-  const handleCreateSubmit = async (e) => {
+  const handleUpdateTenant = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
     try {
-      await createTenant(newTenant);
-      showToast(`Tenant "${newTenant.name}" created successfully!`);
-      setIsCreateOpen(false);
-      setNewTenant({ name: '', email: '', plan: 'Free' });
-      await fetchTenants();
-    } catch (error) {
-      console.error('Failed to create tenant:', error);
-      showToast(error.response?.data?.error || 'Failed to create tenant', 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // Edit Tenant Submit
-  const handleEditSubmit = async (e) => {
-    e.preventDefault();
-    if (!activeTenant) return;
-    setSubmitting(true);
-    try {
+      setSubmitting(true);
       await updateTenant(activeTenant.id, editForm);
-      showToast(`Tenant updated successfully!`);
+      showToast(`Tenant "${editForm.name}" updated successfully`);
       setIsEditOpen(false);
-      await fetchTenants();
+      fetchTenants();
     } catch (error) {
-      console.error('Failed to update tenant:', error);
-      showToast(error.response?.data?.error || 'Failed to update tenant', 'error');
+      console.error('Error updating tenant:', error);
+      showToast(error.message || 'Failed to update tenant', 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Delete Tenant
+  // Delete tenant
   const handleDeleteTenant = async (tenant) => {
-    if (!window.confirm(`Are you sure you want to delete tenant "${tenant.name}"? This action cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to delete "${tenant.name}"? This action will revoke all keys and purge historical events.`)) {
       return;
     }
+
     try {
       await deleteTenant(tenant.id);
-      showToast(`Tenant "${tenant.name}" deleted.`);
-      if (activeTenant?.id === tenant.id) setIsInspectOpen(false);
-      await fetchTenants();
+      showToast(`Tenant "${tenant.name}" deleted successfully`);
+      fetchTenants();
+      if (isInspectOpen && activeTenant?.id === tenant.id) {
+        setIsInspectOpen(false);
+      }
     } catch (error) {
-      console.error('Failed to delete tenant:', error);
-      showToast('Failed to delete tenant', 'error');
+      console.error('Error deleting tenant:', error);
+      showToast(error.message || 'Failed to delete tenant', 'error');
     }
   };
 
-  // Create API Key for active tenant
+  // Create API Key
   const handleCreateKey = async () => {
     if (!activeTenant) return;
     try {
       const result = await createApiKey(activeTenant.id, newKeyName);
       setNewlyCreatedKey(result.api_key);
-      setNewKeyName('Production Key');
-      showToast('New API key generated successfully!');
-      // Refresh key list
+      setCopiedKey(false);
+      showToast(`Generated new key: ${newKeyName}`);
       const updatedKeys = await getApiKeys(activeTenant.id);
       setTenantKeys(updatedKeys || []);
     } catch (err) {
-      console.error('Failed to generate key:', err);
-      showToast(err.response?.data?.error || 'Failed to generate API key', 'error');
+      console.error('Error creating API key:', err);
+      showToast(err.message || 'Failed to generate key', 'error');
     }
   };
 
-  // Rotate Key
+  // Rotate API Key
   const handleRotateKey = async (keyId) => {
     if (!activeTenant) return;
-    if (!window.confirm('Rotating this key will immediately revoke the existing key and generate a replacement. Proceed?')) {
+    if (!window.confirm('Rotating this key will immediately revoke the current key and issue a new secret. Proceed?')) {
       return;
     }
+
     try {
       const result = await rotateApiKey(activeTenant.id, keyId);
       setNewlyCreatedKey(result.api_key);
-      showToast('API key rotated. Store the new key safely!');
+      setCopiedKey(false);
+      showToast('Key rotated successfully. Save the new secret key.');
       const updatedKeys = await getApiKeys(activeTenant.id);
       setTenantKeys(updatedKeys || []);
     } catch (err) {
-      console.error('Failed to rotate key:', err);
-      showToast('Failed to rotate API key', 'error');
+      console.error('Error rotating API key:', err);
+      showToast(err.message || 'Failed to rotate key', 'error');
     }
   };
 
-  // Revoke Key
+  // Revoke API Key
   const handleRevokeKey = async (keyId) => {
     if (!activeTenant) return;
-    if (!window.confirm('Are you sure you want to revoke this API key? Applications using it will lose access immediately.')) {
+    if (!window.confirm('Are you sure you want to revoke this API key? Requests using it will fail immediately.')) {
       return;
     }
+
     try {
       await revokeApiKey(activeTenant.id, keyId);
-      showToast('API key revoked.');
+      showToast('API key revoked successfully');
       const updatedKeys = await getApiKeys(activeTenant.id);
       setTenantKeys(updatedKeys || []);
     } catch (err) {
-      console.error('Failed to revoke key:', err);
-      showToast('Failed to revoke API key', 'error');
+      console.error('Error revoking API key:', err);
+      showToast(err.message || 'Failed to revoke key', 'error');
     }
   };
 
-  // Copy Key to Clipboard
-  const handleCopyKey = (text) => {
-    navigator.clipboard.writeText(text);
+  const handleCopyKey = (keyString) => {
+    navigator.clipboard.writeText(keyString);
     setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+    setTimeout(() => setCopiedKey(false), 2500);
   };
 
-  // Filtered tenants list
-  const filteredTenants = tenants.filter(tenant => {
+  // Filter tenants
+  const filteredTenants = tenants.filter(t => {
     const matchesSearch = 
-      tenant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      tenant.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      tenant.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (tenant.plan || '').toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || tenant.status === statusFilter;
+      t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (t.id && t.id.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const matchesStatus = statusFilter === 'all' || (t.status || 'active') === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   return (
     <div className="space-y-8">
-      {/* Toast Notification */}
+      {/* Toast Feedback */}
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl ${
-              toast.type === 'error' 
-                ? 'bg-red-950/80 border-red-500/30 text-red-200' 
-                : 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-full text-xs font-medium shadow-level-2 flex items-center gap-2 border ${
+              toast.type === 'error'
+                ? 'bg-white text-[#ea2261] border-[#ea2261]/30'
+                : 'bg-[#1c1e54] text-white border-[#533afd]/30'
             }`}
           >
-            {toast.type === 'error' ? <AlertTriangle className="w-5 h-5 text-red-400" /> : <CheckCircle className="w-5 h-5 text-emerald-400" />}
-            <span className="text-sm font-medium">{toast.message}</span>
+            {toast.type === 'error' ? <AlertTriangle className="w-4 h-4 text-[#ea2261]" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981]" />}
+            <span>{toast.message}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-      >
+      {/* Header & Single Indigo CTA */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-2">
         <div>
-          <h1 className="text-4xl font-display font-bold text-white tracking-tight">
-            Tenants
+          <div className="flex items-center gap-2 mb-2">
+            <span className="pill-tag-soft">
+              <Users className="w-3.5 h-3.5" />
+              Multi-Tenant Scoping
+            </span>
+          </div>
+          <h1 className="font-display-lg text-[#0d253d] tracking-display-lg">
+            Tenants & Access Management
           </h1>
-          <p className="text-neutral-400 mt-1">
-            Authorized management of customer accounts, usage scopes, and API credentials.
+          <p className="text-[#64748d] text-[15px] font-normal mt-1 max-w-2xl leading-relaxed">
+            Provision accounts, inspect real-time quota gauges, and issue cryptographic API access keys.
           </p>
         </div>
 
         <button
           onClick={() => setIsCreateOpen(true)}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] hover:opacity-90 text-white font-medium text-sm shadow-lg shadow-[#667eea]/20 transition-all self-start sm:self-auto"
+          className="btn-primary-pill"
         >
           <Plus className="w-4 h-4" />
           <span>New Tenant</span>
         </button>
-      </motion.div>
+      </div>
 
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="relative flex-1 w-full sm:max-w-md">
-          <Search className="w-4 h-4 text-neutral-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* Search & Filter Toolbar */}
+      <div className="card-stripi p-4 bg-white flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="relative w-full md:w-80">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748d]" />
           <input
             type="text"
-            placeholder="Search by name, email, plan, or UUID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-[#0a0a0a]/80 border border-white/10 rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-[#667eea] transition-all"
+            placeholder="Search name, email, or UUID..."
+            className="text-input-stripi pl-9 w-full"
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3.5 py-2.5 bg-[#0a0a0a]/80 border border-white/10 rounded-xl text-neutral-300 text-sm focus:outline-none focus:border-[#667eea]"
-          >
-            <option value="all">All Statuses</option>
-            <option value="active">Active Only</option>
-            <option value="inactive">Inactive / Suspended</option>
-          </select>
-
-          <button
-            onClick={fetchTenants}
-            className="p-2.5 bg-[#0a0a0a]/80 border border-white/10 rounded-xl text-neutral-400 hover:text-white transition-colors"
-            title="Refresh list"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <span className="text-xs text-[#64748d] font-normal mr-1">Status:</span>
+          {['all', 'active', 'suspended', 'pending'].map((status) => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              className={`px-3 py-1.5 rounded-full text-xs font-normal transition-all capitalize ${
+                statusFilter === status
+                  ? 'bg-[#533afd] text-white font-medium shadow-sm'
+                  : 'bg-white text-[#273951] hover:bg-[#f6f9fc] border border-[#e3e8ee]'
+              }`}
+            >
+              {status}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Tenants Table */}
-      <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl"
-      >
+      {/* Tenants Table on White Surface */}
+      <div className="card-stripi bg-white overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-neutral-500 bg-white/[0.01]">
-                <th className="py-4 px-6 font-semibold">Tenant Account</th>
-                <th className="py-4 px-6 font-semibold">Plan</th>
-                <th className="py-4 px-6 font-semibold">Status</th>
-                <th className="py-4 px-6 font-semibold text-right">MTD Usage</th>
-                <th className="py-4 px-6 font-semibold text-right">Estimated Cost</th>
-                <th className="py-4 px-6 font-semibold text-center">Actions</th>
+              <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-xs uppercase tracking-wider text-[#64748d]">
+                <th className="py-3 px-6 font-normal">Account & Identifier</th>
+                <th className="py-3 px-6 font-normal">Plan Tier</th>
+                <th className="py-3 px-6 font-normal">Status</th>
+                <th className="py-3 px-6 font-normal text-right">Units</th>
+                <th className="py-3 px-6 font-normal text-right">Cost</th>
+                <th className="py-3 px-6 font-normal text-center">Manage</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-[#e3e8ee]">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="py-12 text-center text-neutral-400">
-                    <div className="flex items-center justify-center gap-3">
-                      <div className="w-5 h-5 border-2 border-[#667eea] border-t-transparent rounded-full animate-spin" />
-                      <span>Loading authorized tenants...</span>
-                    </div>
+                  <td colSpan="6" className="py-12 text-center text-[#64748d]">
+                    <div className="w-6 h-6 border-2 border-[#533afd] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                    Fetching tenant records...
                   </td>
                 </tr>
-              ) : filteredTenants.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="py-12 text-center text-neutral-500">
-                    {searchTerm ? 'No tenants match your search filter.' : 'No tenants found. Click "New Tenant" to create one.'}
-                  </td>
-                </tr>
-              ) : (
-                filteredTenants.map((tenant) => (
-                  <tr 
-                    key={tenant.id} 
-                    className="hover:bg-white/[0.02] transition-colors group"
-                  >
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white font-bold text-sm shadow-md">
-                          {tenant.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="text-white font-semibold text-sm flex items-center gap-2">
-                            <span>{tenant.name}</span>
-                          </div>
-                          <div className="text-xs text-neutral-400">{tenant.email}</div>
-                          <div className="text-[11px] font-mono text-neutral-500 mt-0.5">{tenant.id}</div>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="py-4 px-6">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
-                        tenant.plan === 'Pro' 
-                          ? 'bg-[#667eea]/15 text-[#818cf8] border-[#667eea]/30' 
-                          : 'bg-white/5 text-neutral-300 border-white/10'
-                      }`}>
-                        {tenant.plan === 'Pro' ? <Crown className="w-3 h-3 text-[#818cf8]" /> : null}
-                        {tenant.plan || 'Free'}
-                      </span>
-                    </td>
-
-                    <td className="py-4 px-6">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
-                        tenant.status === 'active' ? 'text-[#4ade80]' : 'text-neutral-400'
-                      }`}>
-                        <span className={`w-2 h-2 rounded-full ${
-                          tenant.status === 'active' ? 'bg-[#4ade80] animate-pulse' : 'bg-neutral-500'
-                        }`} />
-                        {tenant.status === 'active' ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-
-                    <td className="py-4 px-6 text-right font-mono text-sm text-neutral-300">
-                      {tenant.usage ? Number(tenant.usage).toLocaleString() : '0'} units
-                    </td>
-
-                    <td className="py-4 px-6 text-right font-mono text-sm font-bold text-white">
-                      ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
-                    </td>
-
-                    <td className="py-4 px-6">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
+              ) : filteredTenants.length > 0 ? (
+                filteredTenants.map((tenant) => {
+                  const status = tenant.status || 'active';
+                  return (
+                    <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
+                      <td className="py-4 px-6">
+                        <div 
                           onClick={() => handleInspect(tenant)}
-                          className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-white flex items-center gap-1.5 transition-colors"
-                          title="Inspect details & API keys"
+                          className="cursor-pointer group flex items-center gap-3"
                         >
-                          <Eye className="w-3.5 h-3.5 text-[#667eea]" />
-                          <span>Inspect</span>
-                        </button>
+                          <div className="w-8 h-8 rounded-lg bg-[#533afd]/10 text-[#533afd] font-medium flex items-center justify-center text-xs shrink-0">
+                            {tenant.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="font-normal text-[#0d253d] group-hover:text-[#533afd] transition-colors flex items-center gap-1.5">
+                              <span>{tenant.name}</span>
+                              <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                            <div className="text-xs text-[#64748d]">{tenant.email}</div>
+                            <div className="text-[11px] text-[#61718a] font-mono tnum mt-0.5">{tenant.id}</div>
+                          </div>
+                        </div>
+                      </td>
 
-                        <button
-                          onClick={() => handleOpenEdit(tenant)}
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
-                          title="Edit tenant"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
+                      <td className="py-4 px-6">
+                        <span className="pill-tag-soft">
+                          {tenant.plan || 'Free'}
+                        </span>
+                      </td>
 
-                        <button
-                          onClick={() => handleDeleteTenant(tenant)}
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-colors"
-                          title="Delete tenant"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      <td className="py-4 px-6">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-normal ${
+                          status === 'active' 
+                            ? 'bg-[#10b981]/10 text-[#059669]' 
+                            : 'bg-[#ea2261]/10 text-[#ea2261]'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${status === 'active' ? 'bg-[#10b981]' : 'bg-[#ea2261]'}`} />
+                          <span className="capitalize">{status}</span>
+                        </span>
+                      </td>
+
+                      <td className="py-4 px-6 text-right font-mono tnum text-[#0d253d]">
+                        {(tenant.usage || 0).toLocaleString()}
+                      </td>
+
+                      <td className="py-4 px-6 text-right font-medium text-[#0d253d] font-mono tnum">
+                        ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
+                      </td>
+
+                      <td className="py-4 px-6 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handleInspect(tenant)}
+                            className="p-1.5 rounded-full text-[#64748d] hover:text-[#533afd] hover:bg-[#533afd]/10 transition-colors"
+                            title="Inspect Usage & API Keys"
+                          >
+                            <Key className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(tenant)}
+                            className="p-1.5 rounded-full text-[#64748d] hover:text-[#0d253d] hover:bg-[#f6f9fc] transition-colors"
+                            title="Edit Plan"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTenant(tenant)}
+                            className="p-1.5 rounded-full text-[#64748d] hover:text-[#ea2261] hover:bg-[#ea2261]/10 transition-colors"
+                            title="Delete Tenant"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="6" className="py-12 text-center text-[#64748d] text-sm">
+                    No accounts matching your search query.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
-      </motion.div>
+      </div>
 
-      {/* INSPECT TENANT & API KEYS MODAL */}
+      {/* INSPECTION SLIDE-OVER DRAWER */}
       <AnimatePresence>
         {isInspectOpen && activeTenant && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-3xl bg-[#0e0e10] border border-white/10 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
-            >
-              {/* Modal Header */}
-              <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white font-bold">
-                    {activeTenant.name.charAt(0).toUpperCase()}
-                  </div>
+          <div className="fixed inset-0 z-50 overflow-hidden">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsInspectOpen(false)}
+              className="absolute inset-0 bg-[#0d253d]/40 backdrop-blur-sm"
+            />
+
+            <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+              <motion.div
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                className="w-screen max-w-2xl bg-white shadow-level-3 border-l border-[#e3e8ee] flex flex-col justify-between"
+              >
+                {/* Drawer Header */}
+                <div className="p-6 border-b border-[#e3e8ee] bg-[#f6f9fc] flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                      <span>{activeTenant.name}</span>
-                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/10 font-normal text-neutral-300">
-                        {activeTenant.plan || 'Free'} Plan
-                      </span>
-                    </h2>
-                    <p className="text-xs text-neutral-400 font-mono mt-0.5">{activeTenant.id}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsInspectOpen(false)}
-                  className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div className="p-6 overflow-y-auto space-y-6 flex-1">
-                {/* ONE-TIME API KEY BANNER (When newly generated) */}
-                {newlyCreatedKey && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-4 rounded-xl bg-[#4ade80]/10 border border-[#4ade80]/30 space-y-2"
-                  >
-                    <div className="flex items-center gap-2 text-sm font-bold text-[#4ade80]">
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>New Secret API Key Generated (Shown ONCE only)</span>
-                    </div>
-                    <p className="text-xs text-neutral-300">
-                      Copy this secret immediately. For security, it cannot be recovered after you leave this view.
-                    </p>
-                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-black/60 border border-white/10">
-                      <span className="font-mono text-xs text-emerald-300 flex-1 break-all select-all">
-                        {newlyCreatedKey}
-                      </span>
-                      <button
-                        onClick={() => handleCopyKey(newlyCreatedKey)}
-                        className="px-3 py-1.5 rounded-md bg-[#4ade80] hover:bg-[#4ade80]/90 text-black font-semibold text-xs flex items-center gap-1.5 transition-all shrink-0"
-                      >
-                        {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey ? 'Copied!' : 'Copy Key'}</span>
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* Quota & Usage Gauges */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                    <div className="text-xs text-neutral-400 mb-1 flex items-center gap-1.5">
-                      <Activity className="w-3.5 h-3.5 text-[#667eea]" />
-                      <span>API Calls Used</span>
-                    </div>
-                    <div className="text-xl font-bold font-mono text-white">
-                      {tenantUsage?.usage?.api_calls?.used?.toLocaleString() || '0'}
-                    </div>
-                    <div className="text-xs text-neutral-500 mt-1">
-                      Limit: {tenantUsage?.usage?.api_calls?.limit?.toLocaleString() || '1,000'}
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                    <div className="text-xs text-neutral-400 mb-1 flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5 text-[#f093fb]" />
-                      <span>AI Tokens Used</span>
-                    </div>
-                    <div className="text-xl font-bold font-mono text-white">
-                      {tenantUsage?.usage?.ai_tokens?.used?.toLocaleString() || '0'}
-                    </div>
-                    <div className="text-xs text-neutral-500 mt-1">
-                      Limit: {tenantUsage?.usage?.ai_tokens?.limit?.toLocaleString() || '100,000'}
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                    <div className="text-xs text-neutral-400 mb-1 flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-[#4ade80]" />
-                      <span>Month-to-Date Cost</span>
-                    </div>
-                    <div className="text-xl font-bold font-mono text-[#4ade80]">
-                      ${tenantUsage?.costs?.total_dollars || '0.00'}
-                    </div>
-                    <div className="text-xs text-neutral-500 mt-1">
-                      Exact calculated consumption
-                    </div>
-                  </div>
-                </div>
-
-                {/* API KEYS SECTION */}
-                <div className="border-t border-white/10 pt-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                    <div>
-                      <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                        <Key className="w-4 h-4 text-[#667eea]" />
-                        <span>API Access Keys</span>
-                      </h3>
-                      <p className="text-xs text-neutral-400 mt-0.5">
-                        Manage API keys used to meter programmatic requests for this tenant.
-                      </p>
-                    </div>
-
                     <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={newKeyName}
-                        onChange={(e) => setNewKeyName(e.target.value)}
-                        placeholder="Key label..."
-                        className="px-3 py-1.5 bg-black/50 border border-white/10 rounded-lg text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#667eea]"
-                      />
-                      <button
-                        onClick={handleCreateKey}
-                        className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white text-xs font-semibold hover:opacity-90 flex items-center gap-1.5 transition-all shrink-0"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Generate Key</span>
-                      </button>
+                      <h2 className="text-xl font-normal text-[#0d253d]">{activeTenant.name}</h2>
+                      <span className="pill-tag-soft">{activeTenant.plan || 'Free'}</span>
+                    </div>
+                    <div className="text-xs text-[#64748d] mt-1 font-mono tnum">{activeTenant.id}</div>
+                  </div>
+                  <button
+                    onClick={() => setIsInspectOpen(false)}
+                    className="p-2 rounded-full text-[#64748d] hover:text-[#0d253d] hover:bg-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Drawer Body */}
+                <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                  {/* Newly Created Key Alert (One-Time Reveal) */}
+                  {newlyCreatedKey && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-4 rounded-xl bg-[#1c1e54] text-white border border-[#533afd]/50"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <ShieldAlert className="w-4 h-4 text-[#ea2261]" />
+                        <span className="text-xs font-semibold uppercase tracking-wider text-[#ea2261]">
+                          Important: Copy Your Secret API Key
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#a8c3de] mb-3 leading-relaxed">
+                        This key will never be displayed in plaintext again. Copy and store it in your environment secrets.
+                      </p>
+                      <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-[#0d253d] border border-[#273951] font-mono text-xs text-[#4ade80]">
+                        <span className="truncate">{newlyCreatedKey}</span>
+                        <button
+                          onClick={() => handleCopyKey(newlyCreatedKey)}
+                          className="btn-primary-pill text-xs py-1 px-3"
+                        >
+                          {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedKey ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Quota Gauges */}
+                  <div>
+                    <h3 className="text-xs font-semibold text-[#64748d] uppercase tracking-wider mb-3">
+                      Current Period Quota Status
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                        <div className="text-[11px] text-[#64748d] mb-1">API Calls Used</div>
+                        <div className="text-lg font-normal text-[#0d253d] font-mono tnum">
+                          {tenantUsage?.usage?.api_calls?.used?.toLocaleString() || '0'}
+                        </div>
+                        <div className="text-[10px] text-[#64748d] mt-1 tnum">
+                          Limit: {tenantUsage?.usage?.api_calls?.limit?.toLocaleString() || '1,000'}
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                        <div className="text-[11px] text-[#64748d] mb-1">AI Tokens Used</div>
+                        <div className="text-lg font-normal text-[#0d253d] font-mono tnum">
+                          {tenantUsage?.usage?.ai_tokens?.used?.toLocaleString() || '0'}
+                        </div>
+                        <div className="text-[10px] text-[#64748d] mt-1 tnum">
+                          Limit: {tenantUsage?.usage?.ai_tokens?.limit?.toLocaleString() || '100,000'}
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                        <div className="text-[11px] text-[#64748d] mb-1">MTD Total Cost</div>
+                        <div className="text-lg font-medium text-[#0d253d] font-mono tnum">
+                          ${tenantUsage?.costs?.total_dollars || '0.00'}
+                        </div>
+                        <div className="text-[10px] text-[#10b981] mt-1">Exact sub-cent rate</div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Keys Table */}
-                  <div className="rounded-xl border border-white/10 overflow-hidden bg-black/30">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-white/10 text-neutral-400 bg-white/[0.02]">
-                          <th className="py-2.5 px-4 font-semibold">Key Prefix</th>
-                          <th className="py-2.5 px-4 font-semibold">Name</th>
-                          <th className="py-2.5 px-4 font-semibold">Status</th>
-                          <th className="py-2.5 px-4 font-semibold">Last Used</th>
-                          <th className="py-2.5 px-4 font-semibold text-center">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5 font-mono">
-                        {loadingKeys ? (
-                          <tr>
-                            <td colSpan="5" className="py-6 text-center text-neutral-500 font-sans">
-                              Loading keys...
-                            </td>
+                  {/* API Keys Manager */}
+                  <div className="border-t border-[#e3e8ee] pt-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                      <div>
+                        <h3 className="text-base font-normal text-[#0d253d]">Scoped API Keys</h3>
+                        <p className="text-xs text-[#64748d]">Programmatic credentials for this tenant account</p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={newKeyName}
+                          onChange={(e) => setNewKeyName(e.target.value)}
+                          placeholder="Key label..."
+                          className="text-input-stripi text-xs py-1.5 px-3 w-36"
+                        />
+                        <button
+                          onClick={handleCreateKey}
+                          className="btn-primary-pill text-xs py-1.5 px-3"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Generate Key</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border border-[#e3e8ee] rounded-lg overflow-hidden bg-white">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-[#64748d]">
+                            <th className="py-2.5 px-3 font-normal">Prefix</th>
+                            <th className="py-2.5 px-3 font-normal">Name</th>
+                            <th className="py-2.5 px-3 font-normal">Status</th>
+                            <th className="py-2.5 px-3 font-normal text-right">Actions</th>
                           </tr>
-                        ) : tenantKeys.length === 0 ? (
-                          <tr>
-                            <td colSpan="5" className="py-6 text-center text-neutral-500 font-sans">
-                              No API keys found for this tenant. Click "Generate Key" to create one.
-                            </td>
-                          </tr>
-                        ) : (
-                          tenantKeys.map((key) => {
-                            const isRevoked = key.status === 'revoked' || key.revoked_at;
-                            return (
-                              <tr key={key.id} className="hover:bg-white/[0.02] transition-colors">
-                                <td className="py-2.5 px-4 text-neutral-200">
-                                  {key.prefix}••••••••
-                                </td>
-                                <td className="py-2.5 px-4 text-neutral-300 font-sans">
-                                  {key.name || 'Default Key'}
-                                </td>
-                                <td className="py-2.5 px-4 font-sans">
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ${
-                                    isRevoked 
-                                      ? 'bg-red-500/10 text-red-400 border border-red-500/20' 
-                                      : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        </thead>
+                        <tbody className="divide-y divide-[#e3e8ee] font-mono">
+                          {loadingKeys ? (
+                            <tr>
+                              <td colSpan="4" className="py-4 text-center text-[#64748d] font-sans">
+                                Loading keys...
+                              </td>
+                            </tr>
+                          ) : tenantKeys.length > 0 ? (
+                            tenantKeys.map((key) => (
+                              <tr key={key.id} className="hover:bg-[#f6f9fc]">
+                                <td className="py-2.5 px-3 text-[#0d253d] font-bold tnum">{key.prefix}...</td>
+                                <td className="py-2.5 px-3 text-[#273951] font-sans">{key.name}</td>
+                                <td className="py-2.5 px-3 font-sans">
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] ${
+                                    key.status === 'active' 
+                                      ? 'bg-[#10b981]/10 text-[#059669]' 
+                                      : 'bg-[#ea2261]/10 text-[#ea2261]'
                                   }`}>
-                                    {isRevoked ? 'Revoked' : 'Active'}
+                                    {key.status}
                                   </span>
                                 </td>
-                                <td className="py-2.5 px-4 text-neutral-400 text-[11px] font-sans">
-                                  {key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : 'Never'}
-                                </td>
-                                <td className="py-2.5 px-4 text-center font-sans">
-                                  {!isRevoked ? (
-                                    <div className="flex items-center justify-center gap-2">
+                                <td className="py-2.5 px-3 text-right font-sans">
+                                  {key.status === 'active' && (
+                                    <div className="flex items-center justify-end gap-1.5">
                                       <button
                                         onClick={() => handleRotateKey(key.id)}
-                                        className="text-[11px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 transition-colors"
-                                        title="Rotate key (revokes old and creates new)"
+                                        className="text-[11px] text-[#533afd] hover:underline"
                                       >
                                         Rotate
                                       </button>
+                                      <span className="text-[#e3e8ee]">|</span>
                                       <button
                                         onClick={() => handleRevokeKey(key.id)}
-                                        className="text-[11px] px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-                                        title="Revoke key immediately"
+                                        className="text-[11px] text-[#ea2261] hover:underline"
                                       >
                                         Revoke
                                       </button>
                                     </div>
-                                  ) : (
-                                    <span className="text-[11px] text-neutral-600">Inactive</span>
                                   )}
                                 </td>
                               </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan="4" className="py-4 text-center text-[#64748d] font-sans">
+                                No active API keys. Click "Generate Key" above.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Modal Footer */}
-              <div className="p-4 border-t border-white/10 flex justify-end gap-3 bg-white/[0.02]">
-                <button
-                  onClick={() => setIsInspectOpen(false)}
-                  className="px-5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </motion.div>
+                {/* Drawer Footer */}
+                <div className="p-4 border-t border-[#e3e8ee] bg-[#f6f9fc] flex justify-end">
+                  <button
+                    onClick={() => setIsInspectOpen(false)}
+                    className="btn-secondary-pill text-xs"
+                  >
+                    Close Inspection
+                  </button>
+                </div>
+              </motion.div>
+            </div>
           </div>
         )}
       </AnimatePresence>
@@ -679,74 +649,85 @@ const FramerTenants = () => {
       {/* CREATE TENANT MODAL */}
       <AnimatePresence>
         {isCreateOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-md bg-[#0e0e10] border border-white/10 rounded-2xl shadow-2xl p-6"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCreateOpen(false)}
+              className="absolute inset-0 bg-[#0d253d]/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative card-stripi bg-white p-6 max-w-md w-full shadow-level-3"
             >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white">Create Tenant Account</h2>
-                <button
-                  onClick={() => setIsCreateOpen(false)}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-white"
-                >
+              <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-4">
+                <h3 className="text-lg font-normal text-[#0d253d]">Provision New Tenant</h3>
+                <button onClick={() => setIsCreateOpen(false)} className="text-[#64748d] hover:text-[#0d253d]">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleCreateSubmit} className="space-y-4">
+              <form onSubmit={handleCreateTenant} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Tenant / Organization Name</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Company / Organization Name
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="Acme Corp"
                     value={newTenant.name}
                     onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-[#667eea]"
+                    placeholder="e.g. Acme AI Corp"
+                    className="text-input-stripi w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Primary Contact Email</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Billing Email Address
+                  </label>
                   <input
                     type="email"
                     required
-                    placeholder="billing@acme.com"
                     value={newTenant.email}
                     onChange={(e) => setNewTenant({ ...newTenant, email: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-[#667eea]"
+                    placeholder="billing@acme.com"
+                    className="text-input-stripi w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Initial Subscription Plan</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Plan Subscription
+                  </label>
                   <select
                     value={newTenant.plan}
                     onChange={(e) => setNewTenant({ ...newTenant, plan: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                    className="text-input-stripi w-full"
                   >
-                    <option value="Free">Free Plan (1k calls / 100k tokens, no overage)</option>
-                    <option value="Pro">Pro Plan ($29/mo, 10k calls / 1M tokens, overage enabled)</option>
+                    <option value="Free">Free Tier (1k calls / 100k tokens)</option>
+                    <option value="Pro">Pro Plan ($29/mo, 100k calls / 50M tokens)</option>
+                    <option value="Enterprise">Enterprise Plan ($299/mo, 1M calls)</option>
                   </select>
                 </div>
 
-                <div className="pt-4 flex items-center justify-end gap-3">
+                <div className="pt-2 flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setIsCreateOpen(false)}
-                    className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white text-sm"
+                    className="btn-secondary-pill text-xs"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="btn-primary-pill text-xs"
                   >
-                    {submitting ? 'Creating...' : 'Create Tenant'}
+                    {submitting ? 'Provisioning...' : 'Provision Tenant'}
                   </button>
                 </div>
               </form>
@@ -758,70 +739,96 @@ const FramerTenants = () => {
       {/* EDIT TENANT MODAL */}
       <AnimatePresence>
         {isEditOpen && activeTenant && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-md bg-[#0e0e10] border border-white/10 rounded-2xl shadow-2xl p-6"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsEditOpen(false)}
+              className="absolute inset-0 bg-[#0d253d]/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative card-stripi bg-white p-6 max-w-md w-full shadow-level-3"
             >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white">Edit Tenant</h2>
-                <button
-                  onClick={() => setIsEditOpen(false)}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-white"
-                >
+              <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-4">
+                <h3 className="text-lg font-normal text-[#0d253d]">Update Account Details</h3>
+                <button onClick={() => setIsEditOpen(false)} className="text-[#64748d] hover:text-[#0d253d]">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleEditSubmit} className="space-y-4">
+              <form onSubmit={handleUpdateTenant} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Tenant Name</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Organization Name
+                  </label>
                   <input
                     type="text"
                     required
                     value={editForm.name}
                     onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                    className="text-input-stripi w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Contact Email</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Billing Email
+                  </label>
                   <input
                     type="email"
                     required
                     value={editForm.email}
                     onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                    className="text-input-stripi w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Account Status</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Account Status
+                  </label>
                   <select
                     value={editForm.status}
                     onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                    className="text-input-stripi w-full"
                   >
-                    <option value="active">Active (Access Allowed)</option>
-                    <option value="inactive">Inactive / Suspended</option>
+                    <option value="active">Active</option>
+                    <option value="suspended">Suspended</option>
+                    <option value="pending">Pending</option>
                   </select>
                 </div>
 
-                <div className="pt-4 flex items-center justify-end gap-3">
+                <div>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Subscription Tier
+                  </label>
+                  <select
+                    value={editForm.plan}
+                    onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}
+                    className="text-input-stripi w-full"
+                  >
+                    <option value="Free">Free</option>
+                    <option value="Pro">Pro</option>
+                    <option value="Enterprise">Enterprise</option>
+                  </select>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setIsEditOpen(false)}
-                    className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white text-sm"
+                    className="btn-secondary-pill text-xs"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="btn-primary-pill text-xs"
                   >
                     {submitting ? 'Saving...' : 'Save Changes'}
                   </button>

@@ -3,24 +3,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getUsageHistory, getTenants, exportUsageToCsv, recordUsage } from '../utils/api';
 import { 
   BarChart3, 
-  TrendingUp, 
-  Zap, 
-  Clock, 
   Download, 
-  Filter, 
-  Activity, 
-  ArrowUpRight, 
-  Sparkles, 
-  Layers, 
   Search, 
   RefreshCw, 
   Plus, 
   X, 
-  CheckCircle, 
+  CheckCircle2, 
   AlertTriangle,
   BrainCircuit,
-  FileSpreadsheet,
-  Coins
+  Coins,
+  Activity,
+  Layers,
+  Zap,
+  ArrowUpRight
 } from 'lucide-react';
 
 const FramerUsage = () => {
@@ -72,7 +67,7 @@ const FramerUsage = () => {
       }
     } catch (err) {
       console.error('Error fetching usage data:', err);
-      showToast('Failed to load usage data from server', 'error');
+      showToast('Failed to load usage events from engine', 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -104,62 +99,46 @@ const FramerUsage = () => {
     .filter(e => e.usage_type === 'ai_tokens' || e.metric.includes('Token'))
     .reduce((sum, e) => sum + (e.value || 0), 0);
 
-  const totalCost = filteredEvents
+  const totalCalculatedCost = filteredEvents
     .reduce((sum, e) => sum + (parseFloat(e.cost) || 0), 0);
 
-  // Token categories
-  let inputTokensSum = 0;
-  let cachedTokensSum = 0;
-  let outputTokensSum = 0;
-  let reasoningTokensSum = 0;
-
-  filteredEvents.forEach(e => {
-    if (e.metadata && typeof e.metadata === 'object') {
-      inputTokensSum += parseInt(e.metadata.input_tokens || 0, 10);
-      cachedTokensSum += parseInt(e.metadata.cached_input_tokens || e.metadata.cached_tokens || 0, 10);
-      outputTokensSum += parseInt(e.metadata.output_tokens || 0, 10);
-      reasoningTokensSum += parseInt(e.metadata.reasoning_tokens || 0, 10);
-    } else if (e.usage_type === 'ai_tokens' || e.metric.includes('Token')) {
-      inputTokensSum += (e.value || 0);
-    }
-  });
-
-  // Export CSV
-  const handleExport = () => {
+  // CSV Export handler
+  const handleExportCsv = () => {
     try {
-      exportUsageToCsv(filteredEvents, `usage-export-${new Date().toISOString().split('T')[0]}.csv`);
-      showToast('Usage CSV exported successfully!');
+      exportUsageToCsv(filteredEvents, `usage-meter-report-${new Date().toISOString().split('T')[0]}.csv`);
+      showToast(`Exported ${filteredEvents.length} events to CSV`);
     } catch (err) {
-      showToast(err.message, 'error');
+      console.error('Export error:', err);
+      showToast('Failed to export CSV', 'error');
     }
   };
 
-  // Record a genuine usage event via UI
-  const handleSimulateSubmit = async (e) => {
+  // Simulate Ingestion Event
+  const handleSimulateEvent = async (e) => {
     e.preventDefault();
     if (!simTenantId) {
-      showToast('Please select a tenant', 'error');
+      showToast('Select a tenant', 'error');
       return;
     }
-    setSimulating(true);
 
     try {
-      const idempotencyKey = `ui-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      setSimulating(true);
+      const idempotencyKey = `sim-${Date.now()}-${Math.random().toString(36).substring(7)}`;
       const payload = {
         tenant_id: simTenantId,
         usage_type: simType,
-        quantity: simType === 'api_call' ? parseInt(simQuantity, 10) : (simTokens.input_tokens + simTokens.cached_input_tokens + simTokens.output_tokens + simTokens.reasoning_tokens),
+        quantity: parseInt(simQuantity, 10),
         idempotency_key: idempotencyKey,
-        metadata: simType === 'ai_tokens' ? simTokens : { source: 'dashboard_ui' }
+        metadata: simType === 'ai_tokens' ? simTokens : null
       };
 
       await recordUsage(payload);
-      showToast(`Usage event recorded! Added to database telemetry.`);
+      showToast(`Ingested ${payload.quantity} ${simType === 'api_call' ? 'API calls' : 'tokens'} successfully`);
       setIsSimulateOpen(false);
-      await fetchData(true);
+      fetchData(true);
     } catch (err) {
-      console.error('Error recording usage:', err);
-      showToast(err.response?.data?.error || 'Failed to record usage event', 'error');
+      console.error('Simulation error:', err);
+      showToast(err.message || 'Failed to ingest event', 'error');
     } finally {
       setSimulating(false);
     }
@@ -167,210 +146,108 @@ const FramerUsage = () => {
 
   return (
     <div className="space-y-8">
-      {/* Toast Notification */}
+      {/* Toast Feedback */}
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl ${
-              toast.type === 'error' 
-                ? 'bg-red-950/80 border-red-500/30 text-red-200' 
-                : 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-full text-xs font-medium shadow-level-2 flex items-center gap-2 border ${
+              toast.type === 'error'
+                ? 'bg-white text-[#ea2261] border-[#ea2261]/30'
+                : 'bg-[#1c1e54] text-white border-[#533afd]/30'
             }`}
           >
-            {toast.type === 'error' ? <AlertTriangle className="w-5 h-5 text-red-400" /> : <CheckCircle className="w-5 h-5 text-emerald-400" />}
-            <span className="text-sm font-medium">{toast.message}</span>
+            {toast.type === 'error' ? <AlertTriangle className="w-4 h-4 text-[#ea2261]" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981]" />}
+            <span>{toast.message}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-      >
+      {/* Header & Single Indigo CTA */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-2">
         <div>
-          <h1 className="text-4xl font-display font-bold text-white tracking-tight">
-            Usage & Telemetry
+          <div className="flex items-center gap-2 mb-2">
+            <span className="pill-tag-soft">
+              <Activity className="w-3.5 h-3.5" />
+              Real-Time Ledger
+            </span>
+          </div>
+          <h1 className="font-display-lg text-[#0d253d] tracking-display-lg">
+            Usage History & Event Ledger
           </h1>
-          <p className="text-neutral-400 mt-1">
-            Real-time event streams, token category aggregations, and verified exports.
+          <p className="text-[#64748d] text-[15px] font-normal mt-1 max-w-2xl leading-relaxed">
+            Audit itemized API calls and categorized AI token distributions with sub-cent price accumulation.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 self-start sm:self-auto">
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setIsSimulateOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] hover:opacity-90 text-white font-medium text-sm shadow-lg shadow-[#667eea]/20 transition-all"
+            onClick={handleExportCsv}
+            disabled={filteredEvents.length === 0}
+            className="btn-secondary-pill"
           >
-            <Plus className="w-4 h-4" />
-            <span>Simulate Event</span>
-          </button>
-
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium text-sm transition-all"
-          >
-            <Download className="w-4 h-4 text-neutral-400" />
+            <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
           </button>
 
           <button
-            onClick={() => fetchData(true)}
-            className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-neutral-400 hover:text-white transition-colors"
-            title="Refresh"
+            onClick={() => setIsSimulateOpen(true)}
+            className="btn-primary-pill"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <Plus className="w-4 h-4" />
+            <span>Ingest Event</span>
           </button>
         </div>
-      </motion.div>
-
-      {/* Top Aggregation Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <motion.div
-          whileHover={{ y: -2 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 relative overflow-hidden"
-        >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white mb-4 shadow-md">
-            <Activity className="w-5 h-5" />
-          </div>
-          <div className="text-3xl font-display font-bold text-white font-mono mb-1">
-            {filteredEvents.length.toLocaleString()}
-          </div>
-          <div className="text-xs text-neutral-400 font-medium uppercase tracking-wider">Filtered Events</div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ y: -2 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 relative overflow-hidden"
-        >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#4facfe] to-[#00f2fe] flex items-center justify-center text-white mb-4 shadow-md">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div className="text-3xl font-display font-bold text-white font-mono mb-1">
-            {totalCalls.toLocaleString()}
-          </div>
-          <div className="text-xs text-neutral-400 font-medium uppercase tracking-wider">Total API Calls (1¢/call)</div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ y: -2 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 relative overflow-hidden"
-        >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#f093fb] to-[#f5576c] flex items-center justify-center text-white mb-4 shadow-md">
-            <BrainCircuit className="w-5 h-5" />
-          </div>
-          <div className="text-3xl font-display font-bold text-white font-mono mb-1">
-            {totalTokens.toLocaleString()}
-          </div>
-          <div className="text-xs text-neutral-400 font-medium uppercase tracking-wider">Total AI Tokens</div>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ y: -2 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 relative overflow-hidden"
-        >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#43e97b] to-[#38f9d7] flex items-center justify-center text-white mb-4 shadow-md">
-            <Coins className="w-5 h-5" />
-          </div>
-          <div className="text-3xl font-display font-bold text-[#4ade80] font-mono mb-1">
-            ${totalCost.toFixed(2)}
-          </div>
-          <div className="text-xs text-neutral-400 font-medium uppercase tracking-wider">Exact Computed Value</div>
-        </motion.div>
       </div>
 
-      {/* AI Token Breakdown Panel */}
-      <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#818cf8]" />
-              <span>AI Token Category Breakdown</span>
-            </h2>
-            <p className="text-xs text-neutral-400">Priced transparently with sub-cent micro-accumulation</p>
+      {/* Aggregated Financial & Unit Counters on White Surfaces */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div className="card-stripi p-6 bg-white">
+          <div className="flex items-center justify-between text-xs text-[#64748d] uppercase tracking-wider mb-2">
+            <span>Filtered Metered Calls</span>
+            <Activity className="w-4 h-4 text-[#533afd]" />
           </div>
-          <span className="text-xs font-mono px-3 py-1 rounded-full bg-white/5 border border-white/10 text-neutral-300">
-            {totalTokens.toLocaleString()} Total Tokens
-          </span>
+          <div className="font-display-md text-[#0d253d] tracking-display-md font-mono tnum mb-1">
+            {totalCalls.toLocaleString()}
+          </div>
+          <div className="text-xs text-[#64748d]">$0.01 per standard call</div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
-          {/* Input Tokens */}
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
-            <div className="flex items-center justify-between text-xs text-neutral-400">
-              <span className="font-semibold text-white">Input Tokens</span>
-              <span className="font-mono text-[#818cf8]">$0.30 / 1M</span>
-            </div>
-            <div className="text-xl font-bold font-mono text-white">
-              {inputTokensSum.toLocaleString()}
-            </div>
-            <div className="text-xs text-neutral-500 font-mono">
-              ${((inputTokensSum * 0.30) / 1000000).toFixed(4)}
-            </div>
+        <div className="card-stripi p-6 bg-white">
+          <div className="flex items-center justify-between text-xs text-[#64748d] uppercase tracking-wider mb-2">
+            <span>Filtered AI Tokens</span>
+            <BrainCircuit className="w-4 h-4 text-[#665efd]" />
           </div>
-
-          {/* Cached Input Tokens */}
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
-            <div className="flex items-center justify-between text-xs text-neutral-400">
-              <span className="font-semibold text-white">Cached Input</span>
-              <span className="font-mono text-teal-400">$0.10 / 1M</span>
-            </div>
-            <div className="text-xl font-bold font-mono text-white">
-              {cachedTokensSum.toLocaleString()}
-            </div>
-            <div className="text-xs text-neutral-500 font-mono">
-              ${((cachedTokensSum * 0.10) / 1000000).toFixed(4)}
-            </div>
+          <div className="font-display-md text-[#0d253d] tracking-display-md font-mono tnum mb-1">
+            {totalTokens.toLocaleString()}
           </div>
-
-          {/* Output Tokens */}
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
-            <div className="flex items-center justify-between text-xs text-neutral-400">
-              <span className="font-semibold text-white">Output Tokens</span>
-              <span className="font-mono text-fuchsia-400">$0.60 / 1M</span>
-            </div>
-            <div className="text-xl font-bold font-mono text-white">
-              {outputTokensSum.toLocaleString()}
-            </div>
-            <div className="text-xs text-neutral-500 font-mono">
-              ${((outputTokensSum * 0.60) / 1000000).toFixed(4)}
-            </div>
-          </div>
-
-          {/* Reasoning Tokens */}
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
-            <div className="flex items-center justify-between text-xs text-neutral-400">
-              <span className="font-semibold text-white">Reasoning Tokens</span>
-              <span className="font-mono text-amber-400">$0.60 / 1M</span>
-            </div>
-            <div className="text-xl font-bold font-mono text-white">
-              {reasoningTokensSum.toLocaleString()}
-            </div>
-            <div className="text-xs text-neutral-500 font-mono">
-              ${((reasoningTokensSum * 0.60) / 1000000).toFixed(4)}
-            </div>
-          </div>
+          <div className="text-xs text-[#64748d]">Prompt, cached, output & reasoning</div>
         </div>
-      </motion.div>
 
-      {/* Filter Controls */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative flex-1 w-full md:max-w-md">
-          <Search className="w-4 h-4 text-neutral-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        <div className="card-stripi p-6 bg-white">
+          <div className="flex items-center justify-between text-xs text-[#64748d] uppercase tracking-wider mb-2">
+            <span>Total Evaluated Cost</span>
+            <Coins className="w-4 h-4 text-[#10b981]" />
+          </div>
+          <div className="font-display-md text-[#0d253d] tracking-display-md font-mono tnum mb-1">
+            ${totalCalculatedCost.toFixed(4)}
+          </div>
+          <div className="text-xs text-[#10b981]">Exact sub-cent accumulation</div>
+        </div>
+      </div>
+
+      {/* Filter Toolbar */}
+      <div className="card-stripi p-4 bg-white flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="relative w-full md:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748d]" />
           <input
             type="text"
-            placeholder="Search by tenant name, metric, or idempotency key..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-[#0a0a0a]/80 border border-white/10 rounded-xl text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-[#667eea]"
+            placeholder="Search tenant or idempotency key..."
+            className="text-input-stripi pl-9 w-full"
           />
         </div>
 
@@ -379,11 +256,13 @@ const FramerUsage = () => {
           <select
             value={selectedTenant}
             onChange={(e) => setSelectedTenant(e.target.value)}
-            className="px-3.5 py-2.5 bg-[#0a0a0a]/80 border border-white/10 rounded-xl text-neutral-300 text-sm focus:outline-none focus:border-[#667eea]"
+            className="text-input-stripi text-xs py-1.5"
           >
-            <option value="all">All Tenants</option>
-            {tenants.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+            <option value="all">All Accounts ({tenants.length})</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
             ))}
           </select>
 
@@ -391,243 +270,272 @@ const FramerUsage = () => {
           <select
             value={selectedMetric}
             onChange={(e) => setSelectedMetric(e.target.value)}
-            className="px-3.5 py-2.5 bg-[#0a0a0a]/80 border border-white/10 rounded-xl text-neutral-300 text-sm focus:outline-none focus:border-[#667eea]"
+            className="text-input-stripi text-xs py-1.5"
           >
-            <option value="all">All Usage Types</option>
-            <option value="api_call">API Calls</option>
-            <option value="ai_tokens">AI Tokens</option>
+            <option value="all">All Metrics</option>
+            <option value="api_call">API Calls Only</option>
+            <option value="ai_tokens">AI Tokens Only</option>
           </select>
+
+          <button
+            onClick={() => fetchData(true)}
+            disabled={refreshing}
+            className="btn-secondary-pill text-xs py-1.5 px-3"
+            title="Refresh event list"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-[#533afd] ${refreshing ? 'animate-spin' : ''}`} />
+            <span>Sync</span>
+          </button>
         </div>
       </div>
 
-      {/* Real Events Stream Table */}
-      <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl"
-      >
+      {/* Real Usage Events Table on White Surface */}
+      <div className="card-stripi bg-white overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-neutral-500 bg-white/[0.01]">
-                <th className="py-4 px-6 font-semibold">Timestamp</th>
-                <th className="py-4 px-6 font-semibold">Tenant</th>
-                <th className="py-4 px-6 font-semibold">Metric</th>
-                <th className="py-4 px-6 font-semibold text-right">Units</th>
-                <th className="py-4 px-6 font-semibold text-right">Computed Cost</th>
-                <th className="py-4 px-6 font-semibold">Idempotency Key</th>
+              <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-xs uppercase tracking-wider text-[#64748d]">
+                <th className="py-3 px-6 font-normal">Timestamp</th>
+                <th className="py-3 px-6 font-normal">Account</th>
+                <th className="py-3 px-6 font-normal">Metric Type</th>
+                <th className="py-3 px-6 font-normal">Token Categorization</th>
+                <th className="py-3 px-6 font-normal text-right">Units</th>
+                <th className="py-3 px-6 font-normal text-right">Cost</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-[#e3e8ee]">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="py-12 text-center text-neutral-400">
-                    <div className="flex items-center justify-center gap-3">
-                      <div className="w-5 h-5 border-2 border-[#667eea] border-t-transparent rounded-full animate-spin" />
-                      <span>Loading real usage telemetry...</span>
-                    </div>
+                  <td colSpan="6" className="py-12 text-center text-[#64748d]">
+                    <div className="w-6 h-6 border-2 border-[#533afd] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                    Fetching real-time usage ledger...
                   </td>
                 </tr>
-              ) : filteredEvents.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="py-12 text-center text-neutral-500">
-                    No usage events match your current filter. Click "Simulate Event" to record one!
-                  </td>
-                </tr>
-              ) : (
-                filteredEvents.map((event) => (
-                  <tr key={event.id} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-4 px-6 text-xs text-neutral-400 font-mono whitespace-nowrap">
-                      {event.date} {event.time || ''}
-                    </td>
+              ) : filteredEvents.length > 0 ? (
+                filteredEvents.map((event) => {
+                  const isApi = event.usage_type === 'api_call' || event.metric.includes('API');
+                  const meta = event.metadata;
+                  return (
+                    <tr key={event.id} className="hover:bg-[#f6f9fc] transition-colors">
+                      {/* Timestamp */}
+                      <td className="py-3.5 px-6 font-mono text-xs text-[#64748d] tnum">
+                        <div>{event.date}</div>
+                        <div className="text-[10px] text-[#61718a]">{event.time || ''}</div>
+                      </td>
 
-                    <td className="py-4 px-6">
-                      <span className="text-white font-medium text-sm block">{event.tenant}</span>
-                      <span className="text-[11px] font-mono text-neutral-500">{event.tenant_id?.substring(0, 8)}...</span>
-                    </td>
+                      {/* Tenant Account */}
+                      <td className="py-3.5 px-6">
+                        <div className="font-normal text-[#0d253d]">{event.tenant}</div>
+                        <div className="text-[11px] text-[#64748d] font-mono tnum truncate max-w-[160px]">
+                          {event.idempotency_key || event.tenant_id}
+                        </div>
+                      </td>
 
-                    <td className="py-4 px-6">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
-                        event.usage_type === 'api_call' || event.metric.includes('API')
-                          ? 'bg-[#4facfe]/15 text-[#38bdf8] border-[#4facfe]/30'
-                          : 'bg-[#f093fb]/15 text-[#f472b6] border-[#f093fb]/30'
-                      }`}>
-                        {event.usage_type === 'api_call' || event.metric.includes('API') ? (
-                          <Activity className="w-3 h-3 text-[#38bdf8]" />
+                      {/* Metric Badge */}
+                      <td className="py-3.5 px-6">
+                        <span className="pill-tag-soft">
+                          {event.metric}
+                        </span>
+                      </td>
+
+                      {/* Detailed Token Categorization */}
+                      <td className="py-3.5 px-6 text-xs text-[#64748d]">
+                        {!isApi && meta ? (
+                          <div className="flex flex-wrap gap-2 text-[11px] font-mono tnum">
+                            <span className="text-[#0d253d]" title="Input tokens">In: {(meta.input_tokens || 0).toLocaleString()}</span>
+                            <span className="text-[#64748d]" title="Cached input tokens">Cached: {(meta.cached_input_tokens || meta.cached_tokens || 0).toLocaleString()}</span>
+                            <span className="text-[#533afd]" title="Output tokens">Out: {(meta.output_tokens || 0).toLocaleString()}</span>
+                            {meta.reasoning_tokens ? (
+                              <span className="text-[#ea2261]" title="Reasoning tokens">Reason: {meta.reasoning_tokens.toLocaleString()}</span>
+                            ) : null}
+                          </div>
                         ) : (
-                          <BrainCircuit className="w-3 h-3 text-[#f472b6]" />
+                          <span className="text-[#64748d] text-xs font-mono">Standard HTTP API Request</span>
                         )}
-                        {event.metric}
-                      </span>
-                    </td>
+                      </td>
 
-                    <td className="py-4 px-6 text-right font-mono text-sm text-neutral-200">
-                      {Number(event.value).toLocaleString()}
-                    </td>
+                      {/* Units */}
+                      <td className="py-3.5 px-6 text-right font-mono tnum text-[#0d253d]">
+                        {event.value.toLocaleString()}
+                      </td>
 
-                    <td className="py-4 px-6 text-right font-mono text-sm font-bold text-[#4ade80]">
-                      {event.cost_formatted || `$${event.cost || '0.00'}`}
-                    </td>
-
-                    <td className="py-4 px-6">
-                      <span className="text-xs font-mono text-neutral-400 bg-white/5 px-2 py-1 rounded max-w-[200px] truncate block" title={event.idempotency_key}>
-                        {event.idempotency_key}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                      {/* Cost */}
+                      <td className="py-3.5 px-6 text-right font-medium text-[#0d253d] font-mono tnum">
+                        {event.cost_formatted || `$${event.cost || '0.00'}`}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="6" className="py-12 text-center text-[#64748d] text-sm">
+                    No usage events recorded matching current filters.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
-      </motion.div>
+      </div>
 
-      {/* SIMULATE EVENT MODAL */}
+      {/* SIMULATOR MODAL */}
       <AnimatePresence>
         {isSimulateOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg bg-[#0e0e10] border border-white/10 rounded-2xl shadow-2xl p-6"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSimulateOpen(false)}
+              className="absolute inset-0 bg-[#0d253d]/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative card-stripi bg-white p-6 max-w-lg w-full shadow-level-3"
             >
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-[#667eea]" />
-                    <span>Record Billable Event</span>
-                  </h2>
-                  <p className="text-xs text-neutral-400 mt-0.5">Sends a live metered event through engine validation</p>
+              <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-[#533afd]/10 text-[#533afd] flex items-center justify-center">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-normal text-[#0d253d]">Live Event Simulator</h3>
+                    <p className="text-xs text-[#64748d]">Inject real billable usage into the metering engine</p>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setIsSimulateOpen(false)}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-white"
-                >
+                <button onClick={() => setIsSimulateOpen(false)} className="text-[#64748d] hover:text-[#0d253d]">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleSimulateSubmit} className="space-y-4">
+              <form onSubmit={handleSimulateEvent} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Target Tenant</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Target Account
+                  </label>
                   <select
                     value={simTenantId}
                     onChange={(e) => setSimTenantId(e.target.value)}
                     required
-                    className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+                    className="text-input-stripi w-full"
                   >
-                    {tenants.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.plan} Plan)</option>
+                    {tenants.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.plan || 'Free'})
+                      </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1.5">Usage Type</label>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Usage Metric Type
+                  </label>
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
                       onClick={() => setSimType('api_call')}
-                      className={`p-3 rounded-xl border text-left transition-all ${
-                        simType === 'api_call' 
-                          ? 'bg-[#667eea]/20 border-[#667eea] text-white' 
-                          : 'bg-black/40 border-white/10 text-neutral-400'
+                      className={`p-3 rounded-lg border text-left text-xs transition-all ${
+                        simType === 'api_call'
+                          ? 'border-[#533afd] bg-[#533afd]/5 text-[#533afd] font-medium'
+                          : 'border-[#e3e8ee] hover:bg-[#f6f9fc] text-[#273951]'
                       }`}
                     >
-                      <div className="font-semibold text-sm">API Call</div>
-                      <div className="text-xs text-neutral-500">1 cent / request</div>
+                      <div className="font-normal text-sm mb-0.5">API Call</div>
+                      <div className="text-[11px] text-[#64748d]">$0.01 fixed / request</div>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setSimType('ai_tokens')}
-                      className={`p-3 rounded-xl border text-left transition-all ${
-                        simType === 'ai_tokens' 
-                          ? 'bg-[#667eea]/20 border-[#667eea] text-white' 
-                          : 'bg-black/40 border-white/10 text-neutral-400'
+                      className={`p-3 rounded-lg border text-left text-xs transition-all ${
+                        simType === 'ai_tokens'
+                          ? 'border-[#533afd] bg-[#533afd]/5 text-[#533afd] font-medium'
+                          : 'border-[#e3e8ee] hover:bg-[#f6f9fc] text-[#273951]'
                       }`}
                     >
-                      <div className="font-semibold text-sm">AI Tokens</div>
-                      <div className="text-xs text-neutral-500">Sub-cent breakdown</div>
+                      <div className="font-normal text-sm mb-0.5">AI Tokens</div>
+                      <div className="text-[11px] text-[#64748d]">Prompt & reasoning rates</div>
                     </button>
                   </div>
                 </div>
 
-                {simType === 'api_call' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-300 mb-1.5">Quantity (Calls)</label>
-                    <input
-                      type="number"
-                      min="1"
-                      required
-                      value={simQuantity}
-                      onChange={(e) => setSimQuantity(e.target.value)}
-                      className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-3 p-4 rounded-xl bg-black/40 border border-white/5">
-                    <div className="text-xs font-semibold text-white mb-2">Token Distribution</div>
-                    <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-normal text-[#64748d] uppercase tracking-wider mb-1">
+                    Total Quantity
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={simQuantity}
+                    onChange={(e) => setSimQuantity(e.target.value)}
+                    className="text-input-stripi w-full font-mono tnum"
+                  />
+                </div>
+
+                {simType === 'ai_tokens' && (
+                  <div className="p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee] space-y-3">
+                    <span className="text-xs font-medium text-[#0d253d] block">
+                      Token Breakdown Composition
+                    </span>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
                       <div>
-                        <label className="block text-[11px] text-neutral-400 mb-1">Input Tokens</label>
+                        <label className="block text-[11px] text-[#64748d] mb-1">Input ($0.30/1M)</label>
                         <input
                           type="number"
-                          min="0"
                           value={simTokens.input_tokens}
-                          onChange={(e) => setSimTokens({ ...simTokens, input_tokens: parseInt(e.target.value, 10) || 0 })}
-                          className="w-full px-3 py-1.5 bg-black border border-white/10 rounded-lg text-xs text-white"
+                          onChange={(e) => setSimTokens({ ...simTokens, input_tokens: parseInt(e.target.value) || 0 })}
+                          className="text-input-stripi w-full font-mono tnum"
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] text-neutral-400 mb-1">Cached Input</label>
+                        <label className="block text-[11px] text-[#64748d] mb-1">Cached ($0.10/1M)</label>
                         <input
                           type="number"
-                          min="0"
                           value={simTokens.cached_input_tokens}
-                          onChange={(e) => setSimTokens({ ...simTokens, cached_input_tokens: parseInt(e.target.value, 10) || 0 })}
-                          className="w-full px-3 py-1.5 bg-black border border-white/10 rounded-lg text-xs text-white"
+                          onChange={(e) => setSimTokens({ ...simTokens, cached_input_tokens: parseInt(e.target.value) || 0 })}
+                          className="text-input-stripi w-full font-mono tnum"
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] text-neutral-400 mb-1">Output Tokens</label>
+                        <label className="block text-[11px] text-[#64748d] mb-1">Output ($0.60/1M)</label>
                         <input
                           type="number"
-                          min="0"
                           value={simTokens.output_tokens}
-                          onChange={(e) => setSimTokens({ ...simTokens, output_tokens: parseInt(e.target.value, 10) || 0 })}
-                          className="w-full px-3 py-1.5 bg-black border border-white/10 rounded-lg text-xs text-white"
+                          onChange={(e) => setSimTokens({ ...simTokens, output_tokens: parseInt(e.target.value) || 0 })}
+                          className="text-input-stripi w-full font-mono tnum"
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] text-neutral-400 mb-1">Reasoning Tokens</label>
+                        <label className="block text-[11px] text-[#64748d] mb-1">Reasoning ($0.60/1M)</label>
                         <input
                           type="number"
-                          min="0"
                           value={simTokens.reasoning_tokens}
-                          onChange={(e) => setSimTokens({ ...simTokens, reasoning_tokens: parseInt(e.target.value, 10) || 0 })}
-                          className="w-full px-3 py-1.5 bg-black border border-white/10 rounded-lg text-xs text-white"
+                          onChange={(e) => setSimTokens({ ...simTokens, reasoning_tokens: parseInt(e.target.value) || 0 })}
+                          className="text-input-stripi w-full font-mono tnum"
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
-                <div className="pt-4 flex items-center justify-end gap-3">
+                <div className="pt-2 flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setIsSimulateOpen(false)}
-                    className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white text-sm"
+                    className="btn-secondary-pill text-xs"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={simulating}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="btn-primary-pill text-xs"
                   >
-                    {simulating ? 'Recording...' : 'Send Usage Event'}
+                    {simulating ? 'Ingesting...' : 'Ingest Real Event'}
                   </button>
                 </div>
               </form>

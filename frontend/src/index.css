@@ -1,99 +1,329 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-display: 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --color-primary: #533afd;
+    --color-primary-deep: #4434d4;
+    --color-primary-press: #2e2b8c;
+    --color-primary-soft: #665efd;
+    --color-primary-subdued: #b9b9f9;
+    --color-brand-dark: #1c1e54;
+    --color-ink: #0d253d;
+    --color-ink-secondary: #273951;
+    --color-ink-mute: #64748d;
+    --color-canvas: #ffffff;
+    --color-canvas-soft: #f6f9fc;
+    --color-canvas-cream: #f5e9d4;
+    --color-hairline: #e3e8ee;
+    --color-hairline-input: #a8c3de;
+    --color-ruby: #ea2261;
+    --color-magenta: #f96bee;
+    --color-lemon: #9b6829;
   }
 
-  * {
-    @apply border-white/5;
+  html {
+    font-feature-settings: "ss01" on, "cv05" on;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #f6f9fc;
+    color: #0d253d;
   }
 
   body {
-    @apply bg-[#000000] text-white antialiased;
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #f6f9fc;
+    color: #0d253d;
+    font-weight: 300;
+    line-height: 1.4;
+    font-feature-settings: "ss01" on;
   }
-  
+
+  /* Thin 300 weight is the brand's editorial signature */
   h1, h2, h3, h4, h5, h6 {
-    @apply font-display font-semibold tracking-tight;
+    font-weight: 300;
+    color: #0d253d;
+    font-feature-settings: "ss01" on;
   }
 
-  h1 {
-    @apply text-4xl lg:text-5xl font-bold;
-  }
-
-  h2 {
-    @apply text-3xl lg:text-4xl;
-  }
-
-  h3 {
-    @apply text-2xl lg:text-3xl;
-  }
-
-  h4 {
-    @apply text-xl lg:text-2xl;
-  }
-
-  p {
-    @apply text-neutral-400 leading-relaxed;
-  }
-
-  /* Premium scrollbar */
+  /* Subtle refined scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-[#0a0a0a];
+    background: #f6f9fc;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-white/10 rounded-full;
+    background: #e3e8ee;
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-white/20;
+    background: #a8c3de;
   }
-  
-  /* Selection styling */
+
   ::selection {
-    @apply bg-[#667eea]/30 text-white;
-  }
-  
-  /* Focus ring */
-  :focus-visible {
-    @apply outline-none ring-2 ring-[#667eea]/50 ring-offset-2 ring-offset-[#0a0a0a];
+    background: rgba(83, 58, 253, 0.15);
+    color: #0d253d;
   }
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-  
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-  
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  
-  /* Custom animations */
-  .animation-delay-2000 {
-    animation-delay: 2s;
-  }
-  
-  .animation-delay-4000 {
-    animation-delay: 4s;
-  }
+/* Tabular figures for financial accuracy */
+.tnum, [data-tabular="true"] {
+  font-feature-settings: "tnum" on, "ss01" on;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.42px;
+}
+
+/* Display and Heading scale matching design.md */
+.font-display-xxl {
+  font-size: 56px;
+  font-weight: 300;
+  line-height: 1.03;
+  letter-spacing: -1.4px;
+}
+
+.font-display-xl {
+  font-size: 48px;
+  font-weight: 300;
+  line-height: 1.15;
+  letter-spacing: -0.96px;
+}
+
+.font-display-lg {
+  font-size: 32px;
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.64px;
+}
+
+.font-display-md {
+  font-size: 26px;
+  font-weight: 300;
+  line-height: 1.12;
+  letter-spacing: -0.26px;
+}
+
+.font-heading-lg {
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.22px;
+}
+
+.font-heading-md {
+  font-size: 20px;
+  font-weight: 300;
+  line-height: 1.4;
+  letter-spacing: -0.2px;
+}
+
+.font-heading-sm {
+  font-size: 18px;
+  font-weight: 300;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+/* Atmospheric Gradient Mesh Backdrop */
+.stripi-mesh-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 440px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  background: 
+    radial-gradient(ellipse 65% 55% at 5% 5%, rgba(245, 233, 212, 0.85) 0%, rgba(245, 233, 212, 0) 70%),
+    radial-gradient(ellipse 55% 45% at 30% 12%, rgba(249, 115, 22, 0.22) 0%, rgba(249, 115, 22, 0) 65%),
+    radial-gradient(ellipse 60% 50% at 65% 8%, rgba(185, 185, 249, 0.65) 0%, rgba(185, 185, 249, 0) 70%),
+    radial-gradient(ellipse 50% 55% at 85% 15%, rgba(234, 34, 97, 0.18) 0%, rgba(234, 34, 97, 0) 65%),
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(83, 58, 253, 0.16) 0%, rgba(83, 58, 253, 0) 75%),
+    linear-gradient(180deg, #ffffff 0%, rgba(246, 249, 252, 0.95) 70%, #f6f9fc 100%);
+}
+
+.stripi-mesh-ambient-blob-1 {
+  position: absolute;
+  top: -60px;
+  left: 15%;
+  width: 500px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(102, 94, 253, 0.28) 0%, rgba(102, 94, 253, 0) 70%);
+  filter: blur(50px);
+  animation: meshFloat1 18s ease-in-out infinite alternate;
+}
+
+.stripi-mesh-ambient-blob-2 {
+  position: absolute;
+  top: -40px;
+  right: 15%;
+  width: 480px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(249, 107, 238, 0.22) 0%, rgba(249, 107, 238, 0) 70%);
+  filter: blur(55px);
+  animation: meshFloat2 22s ease-in-out infinite alternate;
+}
+
+@keyframes meshFloat1 {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(40px, 25px) scale(1.08); }
+  100% { transform: translate(-30px, 15px) scale(0.95); }
+}
+
+@keyframes meshFloat2 {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-35px, 30px) scale(1.05); }
+  100% { transform: translate(25px, -15px) scale(0.98); }
+}
+
+/* Stripi Pill Buttons */
+.btn-primary-pill {
+  background-color: #533afd;
+  color: #ffffff;
+  border-radius: 9999px;
+  padding: 8px 18px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 3px rgba(0, 55, 112, 0.12);
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+
+.btn-primary-pill:hover {
+  background-color: #4434d4;
+  box-shadow: 0 2px 6px rgba(83, 58, 253, 0.25);
+  transform: translateY(-0.5px);
+}
+
+.btn-primary-pill:active {
+  background-color: #2e2b8c;
+  transform: translateY(0.5px);
+}
+
+.btn-secondary-pill {
+  background-color: #ffffff;
+  color: #533afd;
+  border-radius: 9999px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #e3e8ee;
+  box-shadow: 0 1px 2px rgba(0, 55, 112, 0.05);
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+
+.btn-secondary-pill:hover {
+  background-color: #f6f9fc;
+  border-color: #a8c3de;
+  color: #4434d4;
+  transform: translateY(-0.5px);
+}
+
+.btn-secondary-pill:active {
+  background-color: #e3e8ee;
+  transform: translateY(0.5px);
+}
+
+.btn-on-dark-pill {
+  background-color: #1c1e54;
+  color: #ffffff;
+  border-radius: 9999px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #273951;
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+
+.btn-on-dark-pill:hover {
+  background-color: #0d253d;
+  border-color: #533afd;
+}
+
+/* Stripi Soft Pill Tag */
+.pill-tag-soft {
+  background-color: rgba(185, 185, 249, 0.45);
+  color: #4434d4;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  border: 1px solid rgba(83, 58, 253, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Stripi Input Fields */
+.text-input-stripi {
+  background-color: #ffffff;
+  color: #0d253d;
+  font-size: 14px;
+  font-weight: 400;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #a8c3de;
+  transition: all 0.15s ease-in-out;
+}
+
+.text-input-stripi:focus {
+  outline: none;
+  border-color: #533afd;
+  box-shadow: 0 0 0 3px rgba(83, 58, 253, 0.12);
+}
+
+/* Stripi Cards */
+.card-stripi {
+  background-color: #ffffff;
+  color: #0d253d;
+  border-radius: 12px;
+  border: 1px solid #e3e8ee;
+  box-shadow: 0 1px 3px rgba(0, 55, 112, 0.08);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card-stripi:hover {
+  box-shadow: 0 4px 12px rgba(0, 55, 112, 0.08);
+  border-color: #d2dbe5;
+}
+
+.card-cream {
+  background-color: #f5e9d4;
+  color: #0d253d;
+  border-radius: 12px;
+  border: 1px solid #ebdcc0;
+  box-shadow: 0 1px 3px rgba(0, 55, 112, 0.05);
+}
+
+.card-dark {
+  background-color: #1c1e54;
+  color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #273951;
+  box-shadow: 0 8px 24px rgba(0, 55, 112, 0.18), 0 2px 6px rgba(0, 55, 112, 0.08);
 }

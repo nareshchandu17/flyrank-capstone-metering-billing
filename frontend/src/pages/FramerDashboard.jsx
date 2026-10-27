@@ -2,22 +2,21 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { getMetrics, getRealTimeUsage, getTenants, getUsageHistory } from '../utils/api';
 import { 
-  TrendingUp, 
-  Users, 
   DollarSign, 
-  Activity,
+  Users, 
+  Activity, 
+  Zap,
+  RefreshCw,
+  Receipt,
   ArrowUpRight,
   ArrowDownRight,
-  Zap,
-  Sparkles,
-  Flame,
-  Clock,
-  RefreshCw,
-  CheckCircle,
-  AlertCircle,
-  XCircle,
   ChevronRight,
-  Receipt
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  Terminal,
+  ExternalLink
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -46,26 +45,27 @@ const FramerDashboard = () => {
       setMetrics(metricsData);
       setRealTimeUsage(usageData || []);
       
-      // Sort tenants by revenue/cost
       const sortedTenants = [...(tenantsData || [])]
         .sort((a, b) => (parseFloat(b.cost) || 0) - (parseFloat(a.cost) || 0))
         .slice(0, 5);
       setTopTenants(sortedTenants);
 
-      // Latest activities from real usage events
       setRecentActivity(
         (historyData || []).slice(0, 5).map(item => ({
+          id: item.id,
           tenant: item.tenant,
-          action: `${item.metric} usage: ${item.value.toLocaleString()} ${item.unit}`,
+          metric: item.metric,
+          value: item.value,
+          unit: item.unit,
           time: item.time ? `${item.date} ${item.time}` : item.date,
           cost: item.cost_formatted || `$${item.cost || '0.00'}`,
-          status: item.metric === 'API Calls' ? 'success' : 'info'
+          type: item.metric === 'API Calls' ? 'api' : 'ai'
         }))
       );
       setError(null);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
-      setError('Unable to connect to the backend server. Please verify the API is running on port 3001.');
+      setError('Unable to reach backend service at port 3001. Ensure database and API are running.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -74,32 +74,29 @@ const FramerDashboard = () => {
 
   useEffect(() => {
     fetchData();
-    // Poll every 30 seconds for live updates
     const interval = setInterval(() => fetchData(false), 30000);
     return () => clearInterval(interval);
   }, []);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[60vh]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-[#667eea]/30 border-t-[#667eea] rounded-full animate-spin" />
-          <p className="text-neutral-400 font-medium tracking-wide">Connecting to metering engine...</p>
-        </div>
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
+        <div className="w-10 h-10 border-2 border-[#e3e8ee] border-t-[#533afd] rounded-full animate-spin mb-4" />
+        <div className="font-heading-sm text-[#0d253d]">Loading financial telemetry...</div>
+        <div className="text-xs text-[#64748d] mt-1">Connecting to PostgreSQL engine & verifying rates</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-8 rounded-2xl bg-[#0a0a0a]/80 border border-red-500/20 text-center max-w-lg mx-auto my-12 backdrop-blur-xl">
-        <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-white mb-2">Connection Error</h3>
-        <p className="text-sm text-neutral-400 mb-6">{error}</p>
-        <button
-          onClick={() => fetchData(true)}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white font-medium hover:opacity-90 transition-opacity"
-        >
+      <div className="card-stripi p-8 max-w-xl mx-auto my-8 text-center bg-white border border-[#ea2261]/30">
+        <div className="w-12 h-12 rounded-full bg-[#ea2261]/10 text-[#ea2261] flex items-center justify-center mx-auto mb-4">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <h2 className="text-xl font-normal text-[#0d253d] mb-2">Engine Disconnected</h2>
+        <p className="text-sm text-[#64748d] mb-6 leading-relaxed">{error}</p>
+        <button onClick={() => fetchData(true)} className="btn-primary-pill">
           Retry Connection
         </button>
       </div>
@@ -108,121 +105,116 @@ const FramerDashboard = () => {
 
   const isGrowthPositive = (metrics?.monthlyGrowth || 0) >= 0;
 
-  const stats = [
+  const statCards = [
     {
-      title: 'Total Revenue',
-      value: `$${metrics?.totalRevenue || '0.00'}`,
-      subtitle: `MTD: $${metrics?.monthlyRevenue || '0.00'}`,
-      change: `${isGrowthPositive ? '+' : ''}${metrics?.monthlyGrowth || 0}%`,
-      trend: isGrowthPositive ? 'up' : 'down',
+      title: 'Monthly Billed Revenue',
+      value: `$${metrics?.monthlyRevenue || '0.00'}`,
+      aux: `Total Lifetime: $${metrics?.totalRevenue || '0.00'}`,
+      badge: `${isGrowthPositive ? '+' : ''}${metrics?.monthlyGrowth || 0}%`,
+      badgePositive: isGrowthPositive,
       icon: DollarSign,
-      gradient: 'from-[#667eea] to-[#764ba2]'
     },
     {
-      title: 'Active Tenants',
+      title: 'Active Provisioned Tenants',
       value: metrics?.activeTenants || 0,
-      subtitle: `Total registered: ${metrics?.totalTenants || 0}`,
-      change: '100% scoped',
-      trend: 'up',
+      aux: `Registered: ${metrics?.totalTenants || 0} scoped accounts`,
+      badge: 'Active Scoped',
+      badgePositive: true,
       icon: Users,
-      gradient: 'from-[#f093fb] to-[#f5576c]'
     },
     {
-      title: 'Total Usage Events',
+      title: 'Total Billable Events',
       value: (metrics?.totalEvents || 0).toLocaleString(),
-      subtitle: `Avg: ${metrics?.avgUsage || 0} / tenant`,
-      change: `${(metrics?.totalApiCalls || 0).toLocaleString()} calls`,
-      trend: 'up',
+      aux: `Avg: ${metrics?.avgUsage || 0} / tenant`,
+      badge: `${(metrics?.totalApiCalls || 0).toLocaleString()} calls`,
+      badgePositive: true,
       icon: Activity,
-      gradient: 'from-[#4facfe] to-[#00f2fe]'
     },
     {
-      title: 'AI Tokens Processed',
+      title: 'AI Tokens Accumulated',
       value: (metrics?.totalAiTokens || 0).toLocaleString(),
-      subtitle: 'Sub-cent accuracy',
-      change: 'Verified',
-      trend: 'up',
+      aux: 'Sub-cent micro-unit arithmetic ($0.000001)',
+      badge: 'Exact Rate',
+      badgePositive: true,
       icon: Zap,
-      gradient: 'from-[#43e97b] to-[#38f9d7]'
     },
   ];
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4"
-      >
+      {/* Editorial Headline Tier */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-2">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-display font-bold text-white tracking-tight">
-              Overview
-            </h1>
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#4ade80]/10 text-[#4ade80] border border-[#4ade80]/20 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
-              Live DB Synced
+          <div className="flex items-center gap-2 mb-2">
+            <span className="pill-tag-soft">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#533afd] animate-pulse" />
+              Real-time Ingestion Engine
             </span>
           </div>
-          <p className="text-neutral-400 mt-1">Real-time system telemetry, usage analytics, and billing status.</p>
+          <h1 className="font-display-xl text-[#0d253d] tracking-display-xl">
+            Financial & Metering Overview
+          </h1>
+          <p className="text-[#64748d] text-[15px] font-normal mt-1 max-w-2xl leading-relaxed">
+            Consolidated telemetry on usage events, sub-cent pricing accumulation, and Stripe test-mode subscriptions.
+          </p>
         </div>
 
+        {/* Action Pills */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => fetchData(true)}
             disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-medium transition-all"
+            className="btn-secondary-pill"
           >
-            <RefreshCw className={`w-4 h-4 text-neutral-400 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 text-[#533afd] ${refreshing ? 'animate-spin' : ''}`} />
+            <span>{refreshing ? 'Syncing...' : 'Sync Telemetry'}</span>
           </button>
           <button
             onClick={() => navigate('/dashboard/tenants')}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] hover:opacity-90 text-white text-sm font-medium shadow-lg shadow-[#667eea]/20 transition-all"
+            className="btn-primary-pill"
           >
-            <Users className="w-4 h-4" />
-            <span>Manage Tenants</span>
+            <span>+ Provision Tenant</span>
           </button>
         </div>
-      </motion.div>
+      </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => {
+      {/* 4 Stat Cards on Near-White Surfaces */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        {statCards.map((stat, i) => {
           const Icon = stat.icon;
           return (
             <motion.div
               key={stat.title}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-              whileHover={{ y: -2, scale: 1.01 }}
-              className="group relative"
+              transition={{ delay: i * 0.05 }}
+              className="card-stripi p-6 bg-white relative overflow-hidden group hover:border-[#a8c3de]"
             >
-              <div className="relative bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 overflow-hidden">
-                <div className={`absolute inset-0 bg-gradient-to-br ${stat.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-300`} />
-                <div className={`absolute top-0 right-0 w-20 h-20 bg-gradient-to-br ${stat.gradient} rounded-bl-3xl opacity-10`} />
-                
-                <div className="relative z-10">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${stat.gradient} flex items-center justify-center shadow-lg shadow-[#667eea]/20`}>
-                      <Icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold ${
-                      stat.trend === 'up' ? 'bg-[#4ade80]/10 text-[#4ade80] border border-[#4ade80]/20' : 'bg-[#f5576c]/10 text-[#f5576c] border border-[#f5576c]/20'
-                    }`}>
-                      {stat.trend === 'up' ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-                      <span>{stat.change}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="text-3xl font-display font-bold text-white mb-1 tracking-tight">{stat.value}</div>
-                  <div className="text-sm font-medium text-neutral-300">{stat.title}</div>
-                  <div className="text-xs text-neutral-500 mt-1">{stat.subtitle}</div>
-                </div>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-medium text-[#64748d] uppercase tracking-wider">
+                  {stat.title}
+                </span>
+                <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full tnum ${
+                  stat.badgePositive 
+                    ? 'bg-[#10b981]/10 text-[#059669]' 
+                    : 'bg-[#ea2261]/10 text-[#ea2261]'
+                }`}>
+                  {stat.badgePositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {stat.badge}
+                </span>
               </div>
+
+              {/* Tabular Figure Display Number */}
+              <div className="font-display-lg text-[#0d253d] tracking-display-lg tnum mb-1">
+                {stat.value}
+              </div>
+
+              <div className="text-[12px] text-[#64748d] tnum leading-tight">
+                {stat.aux}
+              </div>
+
+              {/* Discreet bottom accent hairline on hover */}
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#533afd] opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
             </motion.div>
           );
         })}
@@ -230,239 +222,252 @@ const FramerDashboard = () => {
 
       {/* Billing Status Bar */}
       {metrics?.billingStatus && (
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6"
-        >
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+        <div className="card-stripi p-6 bg-white">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#43e97b]/20 to-[#38f9d7]/20 border border-[#43e97b]/30 flex items-center justify-center">
-                <Receipt className="w-5 h-5 text-[#4ade80]" />
+              <div className="w-9 h-9 rounded-full bg-[#533afd]/10 text-[#533afd] flex items-center justify-center">
+                <Receipt className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-base font-semibold text-white">Billing & Invoicing Status</h3>
-                <p className="text-xs text-neutral-400">Current cycle invoice health & payment reconciliation</p>
+                <h3 className="text-base font-normal text-[#0d253d] tracking-tight">
+                  Billing Period Lifecycle & Settlement
+                </h3>
+                <p className="text-xs text-[#64748d]">Monthly cycle reconciliation with Stripe test mode</p>
               </div>
             </div>
 
             <button
               onClick={() => navigate('/dashboard/history')}
-              className="text-xs font-medium text-[#667eea] hover:text-[#764ba2] flex items-center gap-1 transition-colors"
+              className="text-xs font-normal text-[#533afd] hover:text-[#4434d4] flex items-center gap-1 transition-colors self-start sm:self-auto"
             >
-              View Invoices <ChevronRight className="w-4 h-4" />
+              View All Invoices <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/[0.02] border border-white/5">
-              <CheckCircle className="w-5 h-5 text-[#4ade80]" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+              <CheckCircle2 className="w-4 h-4 text-[#10b981] shrink-0" />
               <div>
-                <div className="text-sm font-bold text-white">{metrics.billingStatus.paid} Paid</div>
-                <div className="text-xs text-neutral-500">Settled invoices</div>
+                <div className="text-sm font-normal text-[#0d253d] tnum">
+                  <span className="font-medium">{metrics.billingStatus.paid}</span> Paid & Settled
+                </div>
+                <div className="text-[11px] text-[#64748d]">Synchronized via Stripe webhooks</div>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/[0.02] border border-white/5">
-              <Clock className="w-5 h-5 text-[#fbbf24]" />
+            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+              <Clock className="w-4 h-4 text-[#9b6829] shrink-0" />
               <div>
-                <div className="text-sm font-bold text-white">{metrics.billingStatus.pending} Pending / Open</div>
-                <div className="text-xs text-neutral-500">Awaiting collection</div>
+                <div className="text-sm font-normal text-[#0d253d] tnum">
+                  <span className="font-medium">{metrics.billingStatus.pending}</span> Open / Pending
+                </div>
+                <div className="text-[11px] text-[#64748d]">Generated with unique period lock</div>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/[0.02] border border-white/5">
-              <XCircle className="w-5 h-5 text-[#f5576c]" />
+            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+              <AlertTriangle className="w-4 h-4 text-[#ea2261] shrink-0" />
               <div>
-                <div className="text-sm font-bold text-white">{metrics.billingStatus.failed} Failed</div>
-                <div className="text-xs text-neutral-500">Requires retry / action</div>
+                <div className="text-sm font-normal text-[#0d253d] tnum">
+                  <span className="font-medium">{metrics.billingStatus.failed}</span> Payment Failed
+                </div>
+                <div className="text-[11px] text-[#64748d]">Requires automatic retry or update</div>
               </div>
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
 
-      {/* Middle Grid: Usage Analytics Chart & Live Activity */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Usage Analytics */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="lg:col-span-2 group relative"
-        >
-          <div className="h-full relative bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-8 overflow-hidden">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-xl font-display font-semibold text-white mb-1">Usage Trends (24h Activity)</h2>
-                <p className="text-sm text-neutral-400">Total API calls and AI tokens logged by hour</p>
-              </div>
-              <button
-                onClick={() => navigate('/dashboard/usage')}
-                className="text-xs font-medium text-neutral-400 hover:text-white flex items-center gap-1 transition-colors"
-              >
-                Deep Analytics <ChevronRight className="w-4 h-4" />
-              </button>
+      {/* Middle Section: 24h Usage Trend Chart & Composited Dark Console Log */}
+      <div className="grid lg:grid-cols-12 gap-6">
+        {/* Real-time Usage Trend Chart */}
+        <div className="lg:col-span-7 card-stripi p-6 sm:p-8 bg-white flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="font-heading-md text-[#0d253d]">Hourly Consumption Trend</h2>
+              <p className="text-xs text-[#64748d] mt-0.5">Aggregated hourly units across all registered tenants (24h)</p>
             </div>
-            
-            <div className="space-y-4">
-              <div className="flex items-end gap-3 h-56 pt-6 pb-2">
-                {realTimeUsage.length > 0 ? (
-                  realTimeUsage.map((item, i) => {
-                    const maxVal = Math.max(...realTimeUsage.map(r => r.value), 10);
-                    const heightPercent = Math.max(8, Math.min(100, Math.round((item.value / maxVal) * 100)));
-                    return (
-                      <div key={i} className="flex-1 flex flex-col items-center h-full justify-end group/bar relative">
-                        {/* Hover Tooltip */}
-                        <div className="opacity-0 group-hover/bar:opacity-100 transition-opacity absolute -top-8 bg-[#1a1a1a] text-white text-xs py-1 px-2.5 rounded-lg border border-white/10 shadow-xl whitespace-nowrap z-20 pointer-events-none">
-                          {item.value.toLocaleString()} units
-                        </div>
+            <button
+              onClick={() => navigate('/dashboard/usage')}
+              className="btn-secondary-pill text-xs py-1.5 px-3"
+            >
+              Usage Explorer
+            </button>
+          </div>
 
-                        <motion.div
-                          initial={{ height: 0 }}
-                          animate={{ height: `${heightPercent}%` }}
-                          transition={{ delay: i * 0.05, duration: 0.5 }}
-                          className="w-full bg-gradient-to-t from-[#667eea] to-[#764ba2] rounded-t-lg opacity-75 group-hover/bar:opacity-100 transition-opacity cursor-pointer shadow-lg shadow-[#667eea]/20"
-                        />
+          {/* Bar Chart Visualization */}
+          <div className="pt-4">
+            <div className="flex items-end gap-3 sm:gap-4 h-48 pb-2">
+              {realTimeUsage.length > 0 ? (
+                realTimeUsage.map((item, idx) => {
+                  const maxVal = Math.max(...realTimeUsage.map(r => r.value), 10);
+                  const heightPercent = Math.max(10, Math.min(100, Math.round((item.value / maxVal) * 100)));
+                  return (
+                    <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group relative">
+                      {/* Tooltip */}
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 bg-[#0d253d] text-white text-[11px] py-1 px-2 rounded font-mono shadow-lg whitespace-nowrap pointer-events-none z-10 tnum">
+                        {item.value.toLocaleString()} units
                       </div>
-                    );
-                  })
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-neutral-500 text-sm">
-                    No recent usage events in the database.
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-between text-xs font-medium text-neutral-500 px-1 border-t border-white/5 pt-3">
-                {realTimeUsage.map((item, i) => (
-                  <span key={i}>{item.time}</span>
-                ))}
-              </div>
+                      <motion.div
+                        initial={{ height: 0 }}
+                        animate={{ height: `${heightPercent}%` }}
+                        transition={{ duration: 0.5, delay: idx * 0.04 }}
+                        className="w-full bg-[#533afd] hover:bg-[#4434d4] rounded-t-sm transition-colors cursor-pointer"
+                        style={{
+                          background: idx === realTimeUsage.length - 1 
+                            ? 'linear-gradient(180deg, #665efd 0%, #533afd 100%)' 
+                            : '#533afd'
+                        }}
+                      />
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-[#64748d] text-sm">
+                  No telemetry recorded in past 24 hours.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between border-t border-[#e3e8ee] pt-3 text-[11px] text-[#64748d] font-mono tnum">
+              {realTimeUsage.map((item, idx) => (
+                <span key={idx}>{item.time}</span>
+              ))}
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        {/* Live Activity Stream */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="group relative"
-        >
-          <div className="relative bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-8 overflow-hidden h-full flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-display font-semibold text-white">Live Activity</h2>
-                <p className="text-xs text-neutral-400">Recent metered requests</p>
+        {/* Composited Dark Navy Console Panel (Stripi Product Signature) */}
+        <div className="lg:col-span-5 card-dark p-6 bg-[#1c1e54] text-white flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-4 border-b border-[#273951] mb-4">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#ea2261]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#9b6829]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
+                <span className="text-xs text-[#a8c3de] font-mono ml-2">stream.metered_events</span>
               </div>
-              <Activity className="w-5 h-5 text-[#667eea]" />
+              <span className="text-[10px] text-[#64748d] font-mono uppercase tracking-wider">Live Tail</span>
             </div>
-            
-            <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[320px] pr-1">
+
+            <div className="space-y-2.5 overflow-hidden">
               {recentActivity.length > 0 ? (
-                recentActivity.map((activity, index) => (
-                  <div key={index} className="flex items-start gap-3.5 p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-all">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[#667eea]/10 text-[#667eea] border border-[#667eea]/20">
-                      <Zap className="w-4 h-4" />
+                recentActivity.map((act) => (
+                  <div key={act.id} className="p-2.5 rounded bg-[#0d253d]/70 border border-[#273951] text-xs font-mono">
+                    <div className="flex items-center justify-between text-[#a8c3de] mb-1">
+                      <span className="font-semibold text-white truncate max-w-[150px]">{act.tenant}</span>
+                      <span className="text-[#10b981] font-bold tnum">{act.cost}</span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-0.5">
-                        <span className="text-white text-sm font-semibold truncate">{activity.tenant}</span>
-                        <span className="text-xs font-mono text-[#4ade80] font-bold">{activity.cost}</span>
-                      </div>
-                      <div className="text-xs text-neutral-400 truncate">{activity.action}</div>
-                      <div className="text-[10px] text-neutral-500 mt-1">{activity.time}</div>
+                    <div className="text-[11px] text-[#64748d] flex items-center justify-between">
+                      <span className="tnum">{act.value.toLocaleString()} {act.unit}</span>
+                      <span className="text-[10px] text-[#61718a] tnum">{act.time}</span>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="py-12 text-center">
-                  <p className="text-sm text-neutral-500">No events recorded yet.</p>
-                  <p className="text-xs text-neutral-600 mt-1">Make an API request to see it live.</p>
+                <div className="py-8 text-center text-xs text-[#a8c3de] font-mono">
+                  Listening on /api/usage...
                 </div>
               )}
             </div>
           </div>
-        </motion.div>
-      </div>
 
-      {/* Top Tenants Section */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-        className="group relative"
-      >
-        <div className="relative bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-8 overflow-hidden">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-xl font-display font-semibold text-white mb-1">Top Tenants by Usage & Cost</h2>
-              <p className="text-sm text-neutral-400">Real-time consumption calculated from monthly events</p>
-            </div>
+          <div className="pt-4 border-t border-[#273951] mt-4 flex items-center justify-between text-xs text-[#a8c3de]">
+            <span className="flex items-center gap-1.5">
+              <Terminal className="w-3.5 h-3.5 text-[#533afd]" />
+              HMAC SHA-256 Validated
+            </span>
             <button
-              onClick={() => navigate('/dashboard/tenants')}
-              className="text-xs font-semibold px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 transition-colors"
+              onClick={() => navigate('/dashboard/usage')}
+              className="text-[#665efd] hover:text-[#b9b9f9] transition-colors flex items-center gap-1"
             >
-              View All Tenants
+              Inspect Feed <ChevronRight className="w-3 h-3" />
             </button>
           </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-neutral-500">
-                  <th className="pb-4 font-semibold px-4">Tenant</th>
-                  <th className="pb-4 font-semibold px-4">Email</th>
-                  <th className="pb-4 font-semibold px-4">Plan</th>
-                  <th className="pb-4 font-semibold px-4 text-right">Total Units</th>
-                  <th className="pb-4 font-semibold px-4 text-right">MTD Cost</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {topTenants.length > 0 ? (
-                  topTenants.map((tenant, index) => (
-                    <tr key={tenant.id || index} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-4 px-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                            {tenant.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <span className="text-white font-medium text-sm block">{tenant.name}</span>
-                            <span className="text-[11px] text-neutral-500 font-mono">{tenant.id?.substring(0, 8)}...</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-4 px-4 text-sm text-neutral-400">{tenant.email}</td>
-                      <td className="py-4 px-4">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${
-                          tenant.plan === 'Pro' 
-                            ? 'bg-[#667eea]/10 text-[#667eea] border-[#667eea]/30' 
-                            : 'bg-white/5 text-neutral-300 border-white/10'
-                        }`}>
-                          {tenant.plan}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4 text-right text-sm font-mono text-neutral-300">
-                        {tenant.usage?.toLocaleString() || 0}
-                      </td>
-                      <td className="py-4 px-4 text-right text-sm font-mono font-bold text-white">
-                        ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="5" className="py-8 text-center text-sm text-neutral-500">
-                      No tenants found. Click "Manage Tenants" to create your first tenant.
+        </div>
+      </div>
+
+      {/* Warm Cream Interlude Card (Stripi Chromatic Interlude) */}
+      <div className="card-cream p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[10px] uppercase tracking-wider font-semibold text-[#9b6829]">Financial Guarantee</span>
+          </div>
+          <h3 className="font-heading-md text-[#0d253d] mb-1">
+            Zero Sub-Cent Financial Rounding Loss
+          </h3>
+          <p className="text-sm text-[#273951] max-w-2xl leading-relaxed">
+            Requests consuming micro-token payloads ($0.000045) are never rounded down to zero. The accumulator preserves sub-cent fractional values across billing cycles for exact invoicing.
+          </p>
+        </div>
+
+        <button 
+          onClick={() => navigate('/dashboard/settings')}
+          className="btn-on-dark-pill shrink-0 self-start md:self-auto"
+        >
+          View Pricing Rules
+        </button>
+      </div>
+
+      {/* Top Tenants Table on White Surface */}
+      <div className="card-stripi p-6 sm:p-8 bg-white">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-[#e3e8ee]">
+          <div>
+            <h2 className="font-heading-md text-[#0d253d]">Active Account Consumption</h2>
+            <p className="text-xs text-[#64748d] mt-0.5">MTD consumption and billable totals ranked by tenant</p>
+          </div>
+          <button
+            onClick={() => navigate('/dashboard/tenants')}
+            className="btn-secondary-pill text-xs py-1.5 px-3 self-start sm:self-auto"
+          >
+            Manage Accounts
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-[#e3e8ee] text-xs uppercase tracking-wider text-[#64748d]">
+                <th className="pb-3 font-normal">Account Name</th>
+                <th className="pb-3 font-normal">Billing Email</th>
+                <th className="pb-3 font-normal">Tier</th>
+                <th className="pb-3 font-normal text-right">Metered Units</th>
+                <th className="pb-3 font-normal text-right">MTD Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#e3e8ee]">
+              {topTenants.length > 0 ? (
+                topTenants.map((tenant) => (
+                  <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
+                    <td className="py-3.5 pr-4">
+                      <div className="font-normal text-[#0d253d]">{tenant.name}</div>
+                      <div className="text-[11px] text-[#64748d] font-mono tnum">{tenant.id.substring(0, 8)}...</div>
+                    </td>
+                    <td className="py-3.5 px-4 text-[#273951]">{tenant.email}</td>
+                    <td className="py-3.5 px-4">
+                      <span className="pill-tag-soft">
+                        {tenant.plan || 'Free'}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono tnum text-[#0d253d]">
+                      {(tenant.usage || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3.5 pl-4 text-right font-medium text-[#0d253d] tnum">
+                      ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
                     </td>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="py-8 text-center text-[#64748d] text-sm">
+                    No tenants found. Click "Provision Tenant" to create your first account.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
