@@ -239,7 +239,7 @@ const FramerHistory = () => {
 
       {/* 4 Overview Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="card-stripi">
+        <div className="card-stripi p-6 bg-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium uppercase tracking-wider text-[#64748d]">Total Invoices</span>
             <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
@@ -254,7 +254,7 @@ const FramerHistory = () => {
           </div>
         </div>
 
-        <div className="card-stripi">
+        <div className="card-stripi p-6 bg-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium uppercase tracking-wider text-[#64748d]">Billed Volume</span>
             <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-emerald-600">
@@ -269,7 +269,7 @@ const FramerHistory = () => {
           </div>
         </div>
 
-        <div className="card-stripi">
+        <div className="card-stripi p-6 bg-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium uppercase tracking-wider text-[#64748d]">Settled / Paid</span>
             <div className="w-8 h-8 rounded-pill bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
@@ -284,7 +284,7 @@ const FramerHistory = () => {
           </div>
         </div>
 
-        <div className="card-stripi">
+        <div className="card-stripi p-6 bg-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium uppercase tracking-wider text-[#64748d]">Pending Collection</span>
             <div className="w-8 h-8 rounded-pill bg-[#f5e9d4] border border-[#9b6829]/20 flex items-center justify-center text-[#9b6829]">
@@ -301,7 +301,7 @@ const FramerHistory = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="card-stripi p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <div className="card-stripi p-4 bg-white flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative flex-1 w-full sm:max-w-md">
           <Search className="w-4 h-4 text-[#64748d] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
@@ -339,7 +339,7 @@ const FramerHistory = () => {
       </div>
 
       {/* Invoices Table */}
-      <div className="card-stripi p-0 overflow-hidden">
+      <div className="card-stripi p-0 bg-white overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>

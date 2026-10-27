@@ -337,15 +337,15 @@ const FramerDashboard = () => {
           </div>
         </div>
 
-        {/* Composited Dark Navy Console Panel (Stripi Product Signature) */}
-        <div className="lg:col-span-5 card-dark p-6 bg-[#1c1e54] text-white flex flex-col justify-between">
+        {/* Live Stream Panel on Pure White Surface */}
+        <div className="lg:col-span-5 card-stripi p-6 bg-white text-[#0d253d] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-4 border-b border-[#273951] mb-4">
+            <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-4">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#ea2261]" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#9b6829]" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
-                <span className="text-xs text-[#a8c3de] font-mono ml-2">stream.metered_events</span>
+                <span className="text-xs text-[#533afd] font-mono ml-2">stream.metered_events</span>
               </div>
               <span className="text-[10px] text-[#64748d] font-mono uppercase tracking-wider">Live Tail</span>
             </div>
@@ -353,10 +353,10 @@ const FramerDashboard = () => {
             <div className="space-y-2.5 overflow-hidden">
               {recentActivity.length > 0 ? (
                 recentActivity.map((act) => (
-                  <div key={act.id} className="p-2.5 rounded bg-[#0d253d]/70 border border-[#273951] text-xs font-mono">
-                    <div className="flex items-center justify-between text-[#a8c3de] mb-1">
-                      <span className="font-semibold text-white truncate max-w-[150px]">{act.tenant}</span>
-                      <span className="text-[#10b981] font-bold tnum">{act.cost}</span>
+                  <div key={act.id} className="p-2.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee] text-xs font-mono">
+                    <div className="flex items-center justify-between text-[#0d253d] mb-1">
+                      <span className="font-semibold truncate max-w-[150px]">{act.tenant}</span>
+                      <span className="text-emerald-700 font-bold tnum">{act.cost}</span>
                     </div>
                     <div className="text-[11px] text-[#64748d] flex items-center justify-between">
                       <span className="tnum">{act.value.toLocaleString()} {act.unit}</span>
@@ -365,21 +365,21 @@ const FramerDashboard = () => {
                   </div>
                 ))
               ) : (
-                <div className="py-8 text-center text-xs text-[#a8c3de] font-mono">
+                <div className="py-8 text-center text-xs text-[#64748d] font-mono">
                   Listening on /api/usage...
                 </div>
               )}
             </div>
           </div>
 
-          <div className="pt-4 border-t border-[#273951] mt-4 flex items-center justify-between text-xs text-[#a8c3de]">
+          <div className="pt-4 border-t border-[#e3e8ee] mt-4 flex items-center justify-between text-xs text-[#64748d]">
             <span className="flex items-center gap-1.5">
               <Terminal className="w-3.5 h-3.5 text-[#533afd]" />
               HMAC SHA-256 Validated
             </span>
             <button
               onClick={() => navigate('/dashboard/usage')}
-              className="text-[#665efd] hover:text-[#b9b9f9] transition-colors flex items-center gap-1"
+              className="text-[#533afd] hover:text-[#4434d4] font-medium transition-colors flex items-center gap-1"
             >
               Inspect Feed <ChevronRight className="w-3 h-3" />
             </button>

@@ -156,7 +156,7 @@ const FramerUsage = () => {
             className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-full text-xs font-medium shadow-level-2 flex items-center gap-2 border ${
               toast.type === 'error'
                 ? 'bg-white text-[#ea2261] border-[#ea2261]/30'
-                : 'bg-[#1c1e54] text-white border-[#533afd]/30'
+                : 'bg-white text-emerald-800 border-emerald-200'
             }`}
           >
             {toast.type === 'error' ? <AlertTriangle className="w-4 h-4 text-[#ea2261]" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981]" />}

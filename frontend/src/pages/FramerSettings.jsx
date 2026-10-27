@@ -149,7 +149,7 @@ const FramerSettings = () => {
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* SECTION 1: AUTHENTICATION */}
-        <div className="card-stripi space-y-4">
+        <div className="card-stripi p-6 bg-white space-y-4">
           <div className="flex items-center gap-3 pb-3 border-b border-[#e3e8ee]">
             <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
               <Key className="w-4 h-4" />
@@ -187,7 +187,7 @@ const FramerSettings = () => {
         </div>
 
         {/* SECTION 2: STRIPE TEST-MODE CONFIGURATION */}
-        <div className="card-stripi space-y-4">
+        <div className="card-stripi p-6 bg-white space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-[#e3e8ee]">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
@@ -254,7 +254,7 @@ const FramerSettings = () => {
         </div>
 
         {/* SECTION 3: USAGE ALERTS & QUOTAS */}
-        <div className="card-stripi space-y-4">
+        <div className="card-stripi p-6 bg-white space-y-4">
           <div className="flex items-center gap-3 pb-3 border-b border-[#e3e8ee]">
             <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
               <Bell className="w-4 h-4" />
@@ -303,7 +303,7 @@ const FramerSettings = () => {
         </div>
 
         {/* SECTION 4: DISPLAY PREFERENCES */}
-        <div className="card-stripi space-y-4">
+        <div className="card-stripi p-6 bg-white space-y-4">
           <div className="flex items-center gap-3 pb-3 border-b border-[#e3e8ee]">
             <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
               <Sliders className="w-4 h-4" />
