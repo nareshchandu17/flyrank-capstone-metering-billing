@@ -1,4 +1,5 @@
 const meterService = require('../services/meterService');
+const invoiceService = require('../services/invoiceService');
 const crypto = require('crypto');
 const uuidv4 = () => (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'));
 const pool = require('../config/database');
@@ -192,6 +193,42 @@ class MeterController {
   }
 
   /**
+   * Generate an invoice for a tenant and billing period
+   * POST /api/invoices/generate
+   */
+  async generateInvoice(req, res) {
+    try {
+      const targetTenantId = req.body.tenant_id || req.tenantId;
+      const { billing_period, create_stripe_invoice = true } = req.body;
+
+      if (!targetTenantId) {
+        return res.status(400).json({
+          error: 'tenant_id is required'
+        });
+      }
+
+      if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only generate invoices for your own tenant'
+        });
+      }
+
+      const result = await invoiceService.generateInvoice(targetTenantId, billing_period, {
+        createStripeInvoice: create_stripe_invoice
+      });
+
+      const statusCode = result.status === 'created' ? 201 : 200;
+      res.status(statusCode).json(result);
+    } catch (error) {
+      console.error('Error generating invoice:', error.message);
+      res.status(error.statusCode || 500).json({
+        error: error.message || 'Internal server error'
+      });
+    }
+  }
+
+  /**
    * Get invoices for tenant
    * GET /api/invoices/:tenant_id or GET /api/invoices
    */
@@ -213,23 +250,7 @@ class MeterController {
         });
       }
       
-      const invoicesResult = await pool.query(
-        'SELECT * FROM invoices WHERE tenant_id = $1 ORDER BY created_at DESC',
-        [targetTenantId]
-      );
-      
-      const invoices = invoicesResult.rows;
-      
-      // Get line items for each invoice
-      for (let i = 0; i < invoices.length; i++) {
-        const lineItemsResult = await pool.query(
-          'SELECT * FROM invoice_line_items WHERE invoice_id = $1',
-          [invoices[i].id]
-        );
-        invoices[i].line_items = lineItemsResult.rows;
-        invoices[i].amount_dollars = (invoices[i].amount_cents / 100).toFixed(2);
-      }
-      
+      const invoices = await invoiceService.getInvoicesForTenant(targetTenantId);
       res.status(200).json(invoices);
       
     } catch (error) {
@@ -237,6 +258,27 @@ class MeterController {
       res.status(500).json({
         error: 'Internal server error'
       });
+    }
+  }
+
+  /**
+   * Get invoice detail by ID
+   * GET /api/invoices/detail/:id
+   */
+  async getInvoiceDetail(req, res) {
+    try {
+      const { id } = req.params;
+      const tenantScope = req.isAdmin ? null : req.tenantId;
+      const invoice = await invoiceService.getInvoiceById(id, tenantScope);
+
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      res.status(200).json(invoice);
+    } catch (error) {
+      console.error('Error getting invoice detail:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
   

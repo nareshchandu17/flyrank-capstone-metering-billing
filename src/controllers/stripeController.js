@@ -111,6 +111,43 @@ class StripeController {
       });
     }
   }
+
+  /**
+   * Reconcile subscriptions between Stripe and local database
+   * POST /api/stripe/reconcile or POST /api/stripe/reconcile/:tenant_id
+   */
+  async reconcileSubscriptions(req, res) {
+    try {
+      const targetTenantId = req.params.tenant_id || (req.body && req.body.tenant_id);
+
+      if (targetTenantId) {
+        if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+          return res.status(403).json({
+            error: 'Forbidden',
+            message: 'Access denied: You can only reconcile your own tenant'
+          });
+        }
+        const result = await stripeService.reconcileTenantSubscription(targetTenantId);
+        return res.status(200).json(result);
+      }
+
+      // Reconcile all tenants (admin only)
+      if (!req.isAdmin) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Admin privileges required to reconcile all subscriptions'
+        });
+      }
+
+      const summary = await stripeService.reconcileAllSubscriptions();
+      res.status(200).json(summary);
+    } catch (error) {
+      console.error('Error during subscription reconciliation:', error.message);
+      res.status(500).json({
+        error: error.message || 'Internal server error'
+      });
+    }
+  }
 }
 
 module.exports = new StripeController();

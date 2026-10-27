@@ -34,6 +34,24 @@ const PRICING_CONFIG = {
       cost_per_million: 60,
     },
   },
+
+  // Plan pricing & limits
+  plans: {
+    Free: {
+      name: 'Free',
+      base_price_cents: 0,
+      api_calls_limit: 1000,
+      ai_tokens_limit: 100000,
+      allow_overage: false,
+    },
+    Pro: {
+      name: 'Pro',
+      base_price_cents: 2900, // $29.00 / month
+      api_calls_limit: 10000,
+      ai_tokens_limit: 1000000,
+      allow_overage: true,
+    },
+  },
 };
 
 /**
@@ -141,6 +159,55 @@ function calculateAPICallCost(quantity) {
   return quantity * PRICING_CONFIG.api_call.cost_per_call;
 }
 
+/**
+ * Validate billing period format YYYY-MM
+ * @param {string} periodString
+ * @returns {boolean}
+ */
+function isValidBillingPeriod(periodString) {
+  if (typeof periodString !== 'string') return false;
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(periodString);
+}
+
+/**
+ * Get UTC Date boundaries for a billing period string (e.g., '2026-10')
+ * @param {string} [periodString] - 'YYYY-MM'
+ * @returns {{ startDate: Date, endDate: Date, billingPeriod: string }}
+ */
+function getBillingPeriodDates(periodString) {
+  let period = periodString;
+  if (!period) {
+    period = getCurrentBillingPeriod();
+  }
+  if (!isValidBillingPeriod(period)) {
+    throw new Error(`Invalid billing period format: ${period}. Expected YYYY-MM`);
+  }
+
+  const [yearStr, monthStr] = period.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10); // 1-indexed (1..12)
+
+  const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+  const endDate = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+
+  return {
+    startDate,
+    endDate,
+    billingPeriod: period,
+  };
+}
+
+/**
+ * Get current billing period string in UTC ('YYYY-MM')
+ * @returns {string}
+ */
+function getCurrentBillingPeriod() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
 module.exports = {
   PRICING_CONFIG,
   calculateTokenCost,
@@ -148,4 +215,7 @@ module.exports = {
   calculateAITokenCost,
   calculateAITokenCostMicroCents,
   calculateAPICallCost,
+  isValidBillingPeriod,
+  getBillingPeriodDates,
+  getCurrentBillingPeriod,
 };

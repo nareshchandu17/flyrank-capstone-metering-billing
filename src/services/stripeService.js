@@ -32,10 +32,23 @@ class StripeService {
   }
 
   /**
+   * Resolve plan name from a given Stripe Price ID
+   * @param {string} priceId - Stripe Price ID
+   * @returns {string} Plan name ('Free' or 'Pro')
+   */
+  getPlanNameFromPriceId(priceId) {
+    const proPriceId = this.getPriceId('Pro');
+    if (priceId && priceId === proPriceId) {
+      return 'Pro';
+    }
+    return 'Free';
+  }
+
+  /**
    * Create a Stripe checkout session for subscription
    * @param {string} tenantId - Tenant UUID
    * @param {string} planName - Plan name ('Free' or 'Pro')
-   * @returns {Object} - Checkout session URL
+   * @returns {Object} - Checkout session URL and ID
    */
   async createCheckoutSession(tenantId, planName) {
     const stripe = this.getStripeClient();
@@ -129,7 +142,6 @@ class StripeService {
     }
 
     try {
-      // 1. Get tenant and their current subscription
       const tenantResult = await pool.query(
         'SELECT * FROM tenants WHERE id = $1',
         [tenantId]
@@ -151,16 +163,14 @@ class StripeService {
       }
       
       const subscription = subResult.rows[0];
-      
       const priceId = this.getPriceId(newPlanName);
       if (!priceId) {
         throw new Error('Invalid plan name');
       }
       
-      // 3. Get subscription from Stripe to find the subscription item ID
+      // Get subscription from Stripe to find subscription item ID
       const stripeSub = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id);
       
-      // 4. Update the subscription in Stripe (Stripe handles proration by default)
       const updatedSub = await stripe.subscriptions.update(
         subscription.stripe_subscription_id,
         {
@@ -172,7 +182,7 @@ class StripeService {
         }
       );
       
-      // 5. Update our DB (Tenant plan changes immediately, webhook will handle future updates)
+      // Update DB
       const planResult = await pool.query('SELECT id FROM plans WHERE name = $1', [newPlanName]);
       if (planResult.rows.length > 0) {
         const planId = planResult.rows[0].id;
@@ -201,7 +211,7 @@ class StripeService {
   }
   
   /**
-   * Handle Stripe webhook events
+   * Handle Stripe webhook events with replay-safe verification
    * @param {string} signature - Stripe signature header
    * @param {string|Buffer} payload - Raw webhook payload Buffer or string
    * @returns {Object} - Event processing result
@@ -242,16 +252,42 @@ class StripeService {
         statusCode: 400
       };
     }
+
+    // 1. Replay Safety: Deduplicate incoming events at the DB level
+    if (event.id) {
+      const recordResult = await pool.query(
+        `INSERT INTO webhook_events (stripe_event_id, event_type)
+         VALUES ($1, $2)
+         ON CONFLICT (stripe_event_id) DO NOTHING
+         RETURNING id`,
+        [event.id, event.type]
+      );
+
+      if (recordResult.rows.length === 0) {
+        return {
+          status: 'duplicate',
+          message: 'Webhook event already processed'
+        };
+      }
+    }
     
     switch (event.type) {
       case 'checkout.session.completed':
-        return await this.handleCheckoutSessionCompleted(event.data.object);
+        return await this.handleCheckoutSessionCompleted(event.data.object, event.id);
       
+      case 'customer.subscription.created':
       case 'customer.subscription.updated':
         return await this.handleSubscriptionUpdated(event.data.object);
       
       case 'customer.subscription.deleted':
         return await this.handleSubscriptionDeleted(event.data.object);
+
+      case 'invoice.paid':
+      case 'invoice.payment_succeeded':
+        return await this.handleInvoicePaid(event.data.object);
+
+      case 'invoice.payment_failed':
+        return await this.handleInvoicePaymentFailed(event.data.object);
       
       default:
         console.log(`Unhandled event type: ${event.type}`);
@@ -265,9 +301,10 @@ class StripeService {
   /**
    * Handle checkout.session.completed event
    * @param {Object} session - Stripe session object
+   * @param {string} [eventId] - Optional Stripe event ID
    * @returns {Object} - Processing result
    */
-  async handleCheckoutSessionCompleted(session) {
+  async handleCheckoutSessionCompleted(session, eventId = null) {
     const client = await pool.connect();
     const stripe = this.getStripeClient();
     
@@ -275,20 +312,22 @@ class StripeService {
       await client.query('BEGIN');
       
       const tenantId = session.metadata?.tenant_id;
-      const planName = session.metadata?.plan_name;
+      const planName = session.metadata?.plan_name || 'Pro';
       
-      // Check for duplicate event processing
-      const existingSubscription = await client.query(
-        'SELECT id FROM subscriptions WHERE stripe_subscription_id = $1',
-        [session.subscription]
-      );
-      
-      if (existingSubscription.rows.length > 0) {
-        await client.query('ROLLBACK');
-        return {
-          status: 'duplicate',
-          message: 'Subscription already processed'
-        };
+      // Check for duplicate subscription processing
+      if (session.subscription) {
+        const existingSubscription = await client.query(
+          'SELECT id FROM subscriptions WHERE stripe_subscription_id = $1',
+          [session.subscription]
+        );
+        
+        if (existingSubscription.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return {
+            status: 'duplicate',
+            message: 'Subscription already processed'
+          };
+        }
       }
       
       // Get plan ID from plan name
@@ -299,36 +338,54 @@ class StripeService {
       
       if (planResult.rows.length === 0) {
         await client.query('ROLLBACK');
-        throw new Error('Plan not found');
+        throw new Error(`Plan "${planName}" not found in database`);
       }
       
       const planId = planResult.rows[0].id;
       
       // Get subscription details from Stripe
-      let subscription = { id: session.subscription, status: 'active', current_period_start: Math.floor(Date.now() / 1000), current_period_end: Math.floor(Date.now() / 1000) + 2592000 };
-      if (stripe && stripe.subscriptions && typeof stripe.subscriptions.retrieve === 'function') {
-        subscription = await stripe.subscriptions.retrieve(session.subscription);
+      let subscription = { 
+        id: session.subscription, 
+        status: 'active', 
+        current_period_start: Math.floor(Date.now() / 1000), 
+        current_period_end: Math.floor(Date.now() / 1000) + 2592000 
+      };
+
+      if (stripe && stripe.subscriptions && typeof stripe.subscriptions.retrieve === 'function' && session.subscription) {
+        try {
+          subscription = await stripe.subscriptions.retrieve(session.subscription);
+        } catch (subErr) {
+          console.warn('Could not retrieve subscription details from Stripe SDK; using fallback values:', subErr.message);
+        }
       }
       
       // Create subscription record
-      await client.query(
-        `INSERT INTO subscriptions 
-         (tenant_id, stripe_subscription_id, status, plan_id, current_period_start, current_period_end)
-         VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6))`,
-        [
-          tenantId,
-          subscription.id,
-          subscription.status,
-          planId,
-          subscription.current_period_start,
-          subscription.current_period_end
-        ]
-      );
+      if (session.subscription) {
+        await client.query(
+          `INSERT INTO subscriptions 
+           (tenant_id, stripe_subscription_id, status, plan_id, current_period_start, current_period_end)
+           VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6))
+           ON CONFLICT (tenant_id, stripe_subscription_id) DO UPDATE
+           SET status = EXCLUDED.status, plan_id = EXCLUDED.plan_id, current_period_end = EXCLUDED.current_period_end`,
+          [
+            tenantId,
+            subscription.id,
+            subscription.status || 'active',
+            planId,
+            subscription.current_period_start,
+            subscription.current_period_end
+          ]
+        );
+      }
       
-      // Update tenant's plan
+      // Update tenant's plan and status to active
       await client.query(
-        'UPDATE tenants SET plan_id = $1 WHERE id = $2',
-        [planId, tenantId]
+        `UPDATE tenants 
+         SET plan_id = $1, 
+             status = 'active',
+             stripe_customer_id = COALESCE(stripe_customer_id, $2)
+         WHERE id = $3`,
+        [planId, session.customer || null, tenantId]
       );
       
       await client.query('COMMIT');
@@ -365,37 +422,92 @@ class StripeService {
       );
       
       if (existingSubscription.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return {
-          status: 'not_found',
-          message: 'Subscription not found in database'
-        };
+        // If not found by subscription ID, try finding tenant by customer ID
+        let tenantId = null;
+        if (subscription.customer) {
+          const tenantByCust = await client.query(
+            'SELECT id FROM tenants WHERE stripe_customer_id = $1',
+            [subscription.customer]
+          );
+          if (tenantByCust.rows.length > 0) {
+            tenantId = tenantByCust.rows[0].id;
+          }
+        }
+
+        if (!tenantId) {
+          await client.query('ROLLBACK');
+          return {
+            status: 'not_found',
+            message: 'Subscription not found in database'
+          };
+        }
+
+        // Insert missing subscription record
+        const priceId = subscription.items?.data?.[0]?.price?.id;
+        const planName = this.getPlanNameFromPriceId(priceId);
+        const planRes = await client.query('SELECT id FROM plans WHERE name = $1', [planName]);
+        const planId = planRes.rows[0]?.id;
+
+        await client.query(
+          `INSERT INTO subscriptions 
+           (tenant_id, stripe_subscription_id, status, plan_id, current_period_start, current_period_end)
+           VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6))`,
+          [
+            tenantId,
+            subscription.id,
+            subscription.status,
+            planId,
+            subscription.current_period_start,
+            subscription.current_period_end
+          ]
+        );
+      } else {
+        // Update subscription status and period
+        await client.query(
+          `UPDATE subscriptions 
+           SET status = $1, 
+               current_period_start = to_timestamp($2),
+               current_period_end = to_timestamp($3),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE stripe_subscription_id = $4`,
+          [
+            subscription.status,
+            subscription.current_period_start,
+            subscription.current_period_end,
+            subscription.id
+          ]
+        );
       }
       
-      // Update subscription status and period
-      await client.query(
-        `UPDATE subscriptions 
-         SET status = $1, 
-             current_period_start = to_timestamp($2),
-             current_period_end = to_timestamp($3),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE stripe_subscription_id = $4`,
-        [
-          subscription.status,
-          subscription.current_period_start,
-          subscription.current_period_end,
-          subscription.id
-        ]
+      // Update tenant status and plan if price changed
+      const priceId = subscription.items?.data?.[0]?.price?.id;
+      const subRecord = await client.query(
+        'SELECT tenant_id FROM subscriptions WHERE stripe_subscription_id = $1',
+        [subscription.id]
       );
-      
-      // Update tenant status based on subscription
-      const tenantId = existingSubscription.rows[0].tenant_id;
-      const tenantStatus = subscription.status === 'active' ? 'active' : 'inactive';
-      
-      await client.query(
-        'UPDATE tenants SET status = $1 WHERE id = $2',
-        [tenantStatus, tenantId]
-      );
+      const tenantId = subRecord.rows[0]?.tenant_id;
+
+      if (tenantId) {
+        let tenantStatus = 'active';
+        if (subscription.status === 'canceled' || subscription.status === 'unpaid') {
+          tenantStatus = 'inactive';
+        } else if (subscription.status === 'past_due') {
+          tenantStatus = 'past_due';
+        }
+
+        const planName = this.getPlanNameFromPriceId(priceId);
+        const planRes = await client.query('SELECT id FROM plans WHERE name = $1', [planName]);
+        const planId = planRes.rows[0]?.id;
+
+        await client.query(
+          `UPDATE tenants 
+           SET status = $1,
+               plan_id = COALESCE($2, plan_id),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3`,
+          [tenantStatus, planId, tenantId]
+        );
+      }
       
       await client.query('COMMIT');
       
@@ -424,7 +536,6 @@ class StripeService {
     try {
       await client.query('BEGIN');
       
-      // Get subscription details
       const existingSubscription = await client.query(
         'SELECT tenant_id FROM subscriptions WHERE stripe_subscription_id = $1',
         [subscription.id]
@@ -440,13 +551,13 @@ class StripeService {
       
       const tenantId = existingSubscription.rows[0].tenant_id;
       
-      // Update subscription status
+      // Update subscription status to canceled
       await client.query(
-        'UPDATE subscriptions SET status = $1 WHERE stripe_subscription_id = $2',
+        'UPDATE subscriptions SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE stripe_subscription_id = $2',
         ['canceled', subscription.id]
       );
       
-      // Move tenant to Free plan
+      // Move tenant back to Free plan
       const freePlanResult = await client.query(
         'SELECT id FROM plans WHERE name = $1',
         ['Free']
@@ -454,7 +565,7 @@ class StripeService {
       
       if (freePlanResult.rows.length > 0) {
         await client.query(
-          'UPDATE tenants SET plan_id = $1 WHERE id = $2',
+          'UPDATE tenants SET plan_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
           [freePlanResult.rows[0].id, tenantId]
         );
       }
@@ -473,6 +584,278 @@ class StripeService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Handle invoice.paid / invoice.payment_succeeded event
+   * @param {Object} invoice - Stripe invoice object
+   * @returns {Object}
+   */
+  async handleInvoicePaid(invoice) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const stripeInvoiceId = invoice.id;
+      const paymentIntentId = invoice.payment_intent;
+      const paidAt = invoice.status_transitions?.paid_at 
+        ? new Date(invoice.status_transitions.paid_at * 1000) 
+        : new Date();
+
+      // Update matching local invoice
+      const updatedInvoice = await client.query(
+        `UPDATE invoices 
+         SET status = 'paid', 
+             stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
+             paid_at = COALESCE($2, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE stripe_invoice_id = $3
+         RETURNING id, tenant_id, billing_period`,
+        [paymentIntentId, paidAt, stripeInvoiceId]
+      );
+
+      // If it's a subscription renewal invoice, update subscription current_period
+      if (invoice.subscription && invoice.lines && invoice.lines.data && invoice.lines.data.length > 0) {
+        const linePeriod = invoice.lines.data[0].period;
+        if (linePeriod && linePeriod.start && linePeriod.end) {
+          await client.query(
+            `UPDATE subscriptions 
+             SET current_period_start = to_timestamp($1),
+                 current_period_end = to_timestamp($2),
+                 status = 'active',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE stripe_subscription_id = $3`,
+            [linePeriod.start, linePeriod.end, invoice.subscription]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return {
+        status: 'success',
+        message: 'Invoice payment recorded successfully',
+        invoice_id: updatedInvoice.rows[0]?.id || null
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error handling invoice.paid:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Handle invoice.payment_failed event
+   * @param {Object} invoice - Stripe invoice object
+   * @returns {Object}
+   */
+  async handleInvoicePaymentFailed(invoice) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `UPDATE invoices 
+         SET status = 'payment_failed', 
+             updated_at = CURRENT_TIMESTAMP
+         WHERE stripe_invoice_id = $1`,
+        [invoice.id]
+      );
+
+      if (invoice.subscription) {
+        const subRes = await client.query(
+          `UPDATE subscriptions 
+           SET status = 'past_due', updated_at = CURRENT_TIMESTAMP
+           WHERE stripe_subscription_id = $1
+           RETURNING tenant_id`,
+          [invoice.subscription]
+        );
+
+        if (subRes.rows.length > 0) {
+          await client.query(
+            `UPDATE tenants SET status = 'past_due', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [subRes.rows[0].tenant_id]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return {
+        status: 'success',
+        message: 'Invoice payment failure recorded'
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error handling invoice.payment_failed:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Reconcile a single tenant's subscription state with Stripe
+   * @param {string} tenantId - Tenant UUID
+   * @returns {Promise<Object>} Reconciliation summary
+   */
+  async reconcileTenantSubscription(tenantId) {
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      return {
+        reconciled: false,
+        reason: 'Stripe is not configured'
+      };
+    }
+
+    const client = await pool.connect();
+    const changes = [];
+
+    try {
+      const tenantRes = await client.query(
+        'SELECT id, name, stripe_customer_id, plan_id, status FROM tenants WHERE id = $1',
+        [tenantId]
+      );
+
+      if (tenantRes.rows.length === 0) {
+        throw new Error('Tenant not found');
+      }
+
+      const tenant = tenantRes.rows[0];
+      if (!tenant.stripe_customer_id) {
+        return {
+          reconciled: true,
+          tenant_id: tenantId,
+          changes: [],
+          message: 'No Stripe customer ID associated with tenant'
+        };
+      }
+
+      // Fetch active subscriptions from Stripe
+      const stripeSubs = await stripe.subscriptions.list({
+        customer: tenant.stripe_customer_id,
+        status: 'all',
+        limit: 1
+      });
+
+      const activeStripeSub = stripeSubs.data.length > 0 ? stripeSubs.data[0] : null;
+
+      // Fetch local DB subscription
+      const dbSubRes = await client.query(
+        "SELECT id, stripe_subscription_id, status, plan_id, current_period_end FROM subscriptions WHERE tenant_id = $1 AND status != 'canceled' ORDER BY created_at DESC LIMIT 1",
+        [tenantId]
+      );
+      const dbSub = dbSubRes.rows.length > 0 ? dbSubRes.rows[0] : null;
+
+      // Case A: Stripe has an active subscription, but DB is missing it or out-of-sync
+      if (activeStripeSub && activeStripeSub.status === 'active') {
+        const priceId = activeStripeSub.items?.data?.[0]?.price?.id;
+        const planName = this.getPlanNameFromPriceId(priceId);
+        const planRes = await client.query('SELECT id FROM plans WHERE name = $1', [planName]);
+        const planId = planRes.rows[0]?.id;
+
+        await client.query('BEGIN');
+
+        if (!dbSub || dbSub.stripe_subscription_id !== activeStripeSub.id) {
+          await client.query(
+            `INSERT INTO subscriptions 
+             (tenant_id, stripe_subscription_id, status, plan_id, current_period_start, current_period_end)
+             VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6))
+             ON CONFLICT (tenant_id, stripe_subscription_id) DO UPDATE 
+             SET status = EXCLUDED.status, plan_id = EXCLUDED.plan_id, current_period_end = EXCLUDED.current_period_end`,
+            [
+              tenant.id,
+              activeStripeSub.id,
+              activeStripeSub.status,
+              planId,
+              activeStripeSub.current_period_start,
+              activeStripeSub.current_period_end
+            ]
+          );
+          changes.push('inserted_or_synced_subscription');
+        } else {
+          // Check for period end or status drift
+          const dbEnd = new Date(dbSub.current_period_end).getTime() / 1000;
+          if (Math.abs(dbEnd - activeStripeSub.current_period_end) > 60 || dbSub.status !== 'active') {
+            await client.query(
+              `UPDATE subscriptions 
+               SET status = 'active', current_period_end = to_timestamp($1), plan_id = $2, updated_at = CURRENT_TIMESTAMP
+               WHERE id = $3`,
+              [activeStripeSub.current_period_end, planId, dbSub.id]
+            );
+            changes.push('updated_subscription_period_and_status');
+          }
+        }
+
+        // Ensure tenant has correct plan and active status
+        if (tenant.plan_id !== planId || tenant.status !== 'active') {
+          await client.query(
+            "UPDATE tenants SET plan_id = $1, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+            [planId, tenant.id]
+          );
+          changes.push(`updated_tenant_plan_to_${planName}`);
+        }
+
+        await client.query('COMMIT');
+      }
+
+      // Case B: Stripe subscription is canceled/missing, but DB has active subscription
+      else if ((!activeStripeSub || activeStripeSub.status === 'canceled') && dbSub && dbSub.status === 'active') {
+        const freePlanResult = await client.query("SELECT id FROM plans WHERE name = 'Free'");
+        const freePlanId = freePlanResult.rows[0]?.id;
+
+        await client.query('BEGIN');
+        await client.query(
+          "UPDATE subscriptions SET status = 'canceled', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+          [dbSub.id]
+        );
+        await client.query(
+          "UPDATE tenants SET plan_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+          [freePlanId, tenant.id]
+        );
+        changes.push('canceled_subscription_and_downgraded_to_free');
+        await client.query('COMMIT');
+      }
+
+      return {
+        reconciled: true,
+        tenant_id: tenantId,
+        changes: changes,
+        synced: changes.length > 0
+      };
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(`Reconciliation error for tenant ${tenantId}:`, err);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Reconcile all tenants having a Stripe customer ID
+   * @returns {Promise<Object>}
+   */
+  async reconcileAllSubscriptions() {
+    const tenantsResult = await pool.query(
+      'SELECT id FROM tenants WHERE stripe_customer_id IS NOT NULL'
+    );
+
+    const results = [];
+    for (const row of tenantsResult.rows) {
+      try {
+        const res = await this.reconcileTenantSubscription(row.id);
+        results.push(res);
+      } catch (err) {
+        results.push({ tenant_id: row.id, error: err.message });
+      }
+    }
+
+    return {
+      total_tenants: tenantsResult.rows.length,
+      reconciled_results: results
+    };
   }
 }
 

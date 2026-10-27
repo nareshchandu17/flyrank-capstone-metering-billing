@@ -64,12 +64,18 @@ CREATE TABLE IF NOT EXISTS usage_alerts (
 -- Invoices table
 CREATE TABLE IF NOT EXISTS invoices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id),
-    billing_period VARCHAR(7) NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    billing_period VARCHAR(7) NOT NULL, -- 'YYYY-MM'
     amount_cents INTEGER NOT NULL,
-    status VARCHAR(50) DEFAULT 'draft',
+    status VARCHAR(50) DEFAULT 'draft', -- 'draft', 'pending', 'paid', 'payment_failed', 'void'
+    stripe_invoice_id VARCHAR(255),
+    stripe_payment_intent_id VARCHAR(255),
+    hosted_invoice_url TEXT,
+    invoice_pdf TEXT,
+    paid_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, billing_period)
 );
 
 -- Invoice line items table
@@ -79,6 +85,15 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
     description VARCHAR(255) NOT NULL,
     quantity INTEGER NOT NULL,
     amount_cents INTEGER NOT NULL
+);
+
+-- Webhook events table for replay-safe processing
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_event_id VARCHAR(255) UNIQUE NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) DEFAULT 'processed',
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- API Keys table
@@ -100,6 +115,11 @@ ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
 ALTER TABLE usage_alerts ADD COLUMN IF NOT EXISTS metric_type VARCHAR(50) NOT NULL DEFAULT 'api_call';
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(255);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(255);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS hosted_invoice_url TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_pdf TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
 DO $$ 
 BEGIN
     IF EXISTS (
@@ -111,6 +131,11 @@ BEGIN
         SELECT 1 FROM pg_constraint WHERE conname = 'usage_alerts_tenant_alert_period_metric_key'
     ) THEN
         ALTER TABLE usage_alerts ADD CONSTRAINT usage_alerts_tenant_alert_period_metric_key UNIQUE(tenant_id, alert_type, billing_period, metric_type);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'invoices_tenant_billing_period_key'
+    ) THEN
+        ALTER TABLE invoices ADD CONSTRAINT invoices_tenant_billing_period_key UNIQUE(tenant_id, billing_period);
     END IF;
 END $$;
 
@@ -124,6 +149,9 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscript
 CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant ON usage_alerts(tenant_id, billing_period);
 CREATE INDEX IF NOT EXISTS idx_usage_alerts_tenant_metric ON usage_alerts(tenant_id, billing_period, metric_type);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_tenant_period ON invoices(tenant_id, billing_period);
+CREATE INDEX IF NOT EXISTS idx_invoices_stripe_id ON invoices(stripe_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_stripe_id ON webhook_events(stripe_event_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);

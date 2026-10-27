@@ -15,5 +15,7 @@ router.get('/usage', requireTenantOrAdmin, meterController.getUsageSummary);
 router.get('/usage/:tenant_id', requireTenantOrAdmin, meterController.getUsageSummary);
 router.get('/invoices', requireTenantOrAdmin, meterController.getInvoices);
 router.get('/invoices/:tenant_id', requireTenantOrAdmin, meterController.getInvoices);
+router.get('/invoices/detail/:id', requireTenantOrAdmin, meterController.getInvoiceDetail);
+router.post('/invoices/generate', requireTenantOrAdmin, meterController.generateInvoice);
 
 module.exports = router;
