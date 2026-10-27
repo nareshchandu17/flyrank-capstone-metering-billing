@@ -25,7 +25,7 @@ const FramerLayout = () => {
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', gradient: 'from-[#667eea] to-[#764ba2]' },
     { path: '/dashboard/tenants', icon: Users, label: 'Tenants', gradient: 'from-[#f093fb] to-[#f5576c]' },
     { path: '/dashboard/usage', icon: BarChart3, label: 'Usage', gradient: 'from-[#4facfe] to-[#00f2fe]' },
-    { path: '/dashboard/history', icon: History, label: 'History', gradient: 'from-[#43e97b] to-[#38f9d7]' },
+    { path: '/dashboard/history', icon: History, label: 'Billing & Invoices', gradient: 'from-[#43e97b] to-[#38f9d7]' },
     { path: '/dashboard/settings', icon: Settings, label: 'Settings', gradient: 'from-[#fa709a] to-[#fee140]' },
   ];
 

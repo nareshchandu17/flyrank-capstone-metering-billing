@@ -1,252 +1,380 @@
-import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { getSettings, saveSettings, reconcileSubscriptions } from '../utils/api';
 import { 
   Settings as SettingsIcon, 
-  User, 
+  Key, 
+  CreditCard, 
   Bell, 
-  Shield,
-  CreditCard,
-  Globe,
-  Key,
-  Save,
-  ChevronRight,
-  ToggleLeft,
-  ToggleRight,
+  Sliders, 
+  Save, 
+  CheckCircle, 
+  AlertTriangle, 
+  Eye, 
+  EyeOff, 
+  RotateCw, 
+  ShieldCheck,
+  RefreshCw,
   Zap,
-  Palette,
-  Sliders,
-  Monitor,
-  Smartphone,
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
-  Sparkles,
-  CheckCircle
+  Globe
 } from 'lucide-react';
 
 const FramerSettings = () => {
-  const settingsSections = [
-    {
-      title: 'Profile',
-      icon: User,
-      gradient: 'from-[#667eea] to-[#764ba2]',
-      items: [
-        { label: 'Personal Information', description: 'Update your profile details' },
-        { label: 'Email Preferences', description: 'Manage email notifications' },
-        { label: 'Security Settings', description: 'Password and 2FA settings' },
-      ]
-    },
-    {
-      title: 'Billing',
-      icon: CreditCard,
-      gradient: 'from-[#f093fb] to-[#f5576c]',
-      items: [
-        { label: 'Payment Methods', description: 'Manage payment options' },
-        { label: 'Billing History', description: 'View past invoices' },
-        { label: 'Subscription Plan', description: 'Upgrade or downgrade' },
-      ]
-    },
-    {
-      title: 'Notifications',
-      icon: Bell,
-      gradient: 'from-[#4facfe] to-[#00f2fe]',
-      items: [
-        { label: 'Push Notifications', description: 'Manage push alerts' },
-        { label: 'Email Alerts', description: 'Configure email notifications' },
-        { label: 'SMS Alerts', description: 'Text message preferences' },
-      ]
-    },
-    {
-      title: 'Security',
-      icon: Shield,
-      gradient: 'from-[#43e97b] to-[#38f9d7]',
-      items: [
-        { label: 'API Keys', description: 'Manage API access tokens' },
-        { label: 'Webhooks', description: 'Configure webhook endpoints' },
-        { label: 'Audit Logs', description: 'View security events' },
-      ]
-    },
-  ];
+  const [settings, setSettings] = useState({
+    adminApiKey: 'admin-secret-key',
+    alertThresholdPercent: 80,
+    criticalThresholdPercent: 100,
+    stripePricePro: 'price_pro_plan_id',
+    stripePriceFree: 'price_free_plan_id',
+    autoReconcile: true,
+    currency: 'USD',
+    pollIntervalSeconds: 30
+  });
 
-  const appearanceSettings = [
-    { label: 'Dark Mode', description: 'Use dark theme across the app', enabled: true },
-    { label: 'Reduce Motion', description: 'Minimize animations', enabled: false },
-    { label: 'Compact Mode', description: 'More compact UI layout', enabled: false },
-    { label: 'High Contrast', description: 'Increase color contrast', enabled: false },
-  ];
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testingStripe, setTestingStripe] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    const loaded = getSettings();
+    setSettings(prev => ({ ...prev, ...loaded }));
+  }, []);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      saveSettings(settings);
+      showToast('Settings saved successfully! Changes active immediately.');
+    } catch (err) {
+      showToast('Failed to save settings.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestStripe = async () => {
+    setTestingStripe(true);
+    try {
+      const res = await reconcileSubscriptions();
+      showToast(`Stripe test connection verified! Processed ${res.total_tenants || 0} customer subscriptions.`);
+    } catch (err) {
+      console.error('Stripe test failed:', err);
+      showToast(err.response?.data?.error || 'Stripe connection test failed', 'error');
+    } finally {
+      setTestingStripe(false);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    if (!window.confirm('Reset all settings to default configuration?')) return;
+    const defaults = {
+      adminApiKey: 'admin-secret-key',
+      alertThresholdPercent: 80,
+      criticalThresholdPercent: 100,
+      stripePricePro: 'price_pro_plan_id',
+      stripePriceFree: 'price_free_plan_id',
+      autoReconcile: true,
+      currency: 'USD',
+      pollIntervalSeconds: 30
+    };
+    setSettings(defaults);
+    saveSettings(defaults);
+    showToast('Settings reset to defaults.');
+  };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-4xl">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-3 backdrop-blur-xl ${
+              toast.type === 'error' 
+                ? 'bg-red-950/80 border-red-500/30 text-red-200' 
+                : 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+            }`}
+          >
+            {toast.type === 'error' ? (
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+            ) : (
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+            )}
+            <span className="text-sm font-medium">{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="flex items-center justify-between"
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
       >
         <div>
-          <h1 className="text-4xl font-display font-bold text-white mb-2">
-            Settings
+          <h1 className="text-4xl font-display font-bold text-white tracking-tight">
+            Engine Settings
           </h1>
-          <p className="text-neutral-400">Manage your account and preferences</p>
+          <p className="text-neutral-400 mt-1">
+            Configured parameters backed by active save, update, and authentication operations.
+          </p>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white rounded-xl font-medium shadow-lg shadow-[#667eea]/30"
-        >
-          <Save className="w-5 h-5" />
-          <span>Save Changes</span>
-        </motion.button>
-      </motion.div>
 
-      {/* Settings Grid */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {settingsSections.map((section, index) => (
-          <motion.div
-            key={section.title}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            whileHover={{ y: -5 }}
-            className="group relative"
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 text-xs font-semibold transition-all"
           >
-            <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 p-6 overflow-hidden">
-              {/* Gradient border glow */}
-              <div className={`absolute inset-0 bg-gradient-to-br ${section.gradient} opacity-0 group-hover:opacity-10 transition-opacity duration-300`} />
-              
-              {/* Section Header */}
-              <div className="relative z-10 flex items-center gap-4 mb-6">
-                <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${section.gradient} flex items-center justify-center shadow-lg`}>
-                  <section.icon className="w-6 h-6 text-white" />
-                </div>
-                <h2 className="text-xl font-display font-bold text-white">{section.title}</h2>
-              </div>
-              
-              {/* Section Items */}
-              <div className="relative z-10 space-y-3">
-                {section.items.map((item, itemIndex) => (
-                  <motion.div
-                    key={item.label}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.2 + itemIndex * 0.1 }}
-                    whileHover={{ x: 5 }}
-                    className="flex items-center justify-between p-4 rounded-2xl bg-[#0a0a0a]/30 border border-white/5 hover:border-white/10 transition-all cursor-pointer group/item"
-                  >
-                    <div className="flex-1">
-                      <div className="text-white font-medium mb-1">{item.label}</div>
-                      <div className="text-sm text-neutral-400">{item.description}</div>
-                    </div>
-                    <motion.div
-                      whileHover={{ x: 5 }}
-                      className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                    >
-                      <ChevronRight className="w-5 h-5 text-neutral-400" />
-                    </motion.div>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
+            Reset Defaults
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] hover:opacity-90 text-white font-medium text-sm shadow-lg shadow-[#667eea]/20 transition-all"
+          >
+            <Save className="w-4 h-4" />
+            <span>{saving ? 'Saving...' : 'Save Settings'}</span>
+          </button>
+        </div>
+      </motion.div>
 
-      {/* Appearance Settings */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-        whileHover={{ y: -5 }}
-        className="group relative"
-      >
-        <div className="relative bg-[#0a0a0a]/50 backdrop-blur-xl rounded-3xl border border-white/5 p-8 overflow-hidden">
-          <div className="flex items-center gap-4 mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#fa709a] to-[#fee140] flex items-center justify-center shadow-lg">
-              <Palette className="w-6 h-6 text-white" />
+      <form onSubmit={handleSave} className="space-y-6">
+        {/* SECTION 1: AUTHENTICATION */}
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
+        >
+          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#667eea] to-[#764ba2] flex items-center justify-center text-white shadow-md">
+              <Key className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-2xl font-display font-bold text-white mb-1">Appearance</h2>
-              <p className="text-sm text-neutral-400">Customize your interface</p>
+              <h2 className="text-base font-bold text-white">Administrative Authentication</h2>
+              <p className="text-xs text-neutral-400">Master key used for administrative routes and tenant management</p>
             </div>
           </div>
-          
-          <div className="space-y-4">
-            {appearanceSettings.map((setting, index) => (
-              <motion.div
-                key={setting.label}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5 + index * 0.1 }}
-                whileHover={{ x: 5 }}
-                className="flex items-center justify-between p-4 rounded-2xl bg-[#0a0a0a]/30 border border-white/5 hover:border-white/10 transition-all"
+
+          <div>
+            <label className="block text-xs font-medium text-neutral-300 mb-1.5">
+              Admin API Key (ADMIN_API_KEY)
+            </label>
+            <div className="relative">
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                required
+                value={settings.adminApiKey}
+                onChange={(e) => setSettings({ ...settings, adminApiKey: e.target.value })}
+                className="w-full pl-4 pr-12 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#667eea]"
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
               >
-                <div className="flex-1">
-                  <div className="text-white font-medium mb-1">{setting.label}</div>
-                  <div className="text-sm text-neutral-400">{setting.description}</div>
-                </div>
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-                >
-                  {setting.enabled ? (
-                    <ToggleRight className="w-6 h-6 text-[#667eea]" />
-                  ) : (
-                    <ToggleLeft className="w-6 h-6 text-neutral-400" />
-                  )}
-                </motion.button>
-              </motion.div>
-            ))}
+                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-[11px] text-neutral-500 mt-1">
+              Passed via Authorization: Bearer &lt;key&gt; header to access administrative endpoints.
+            </p>
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
 
-      {/* Danger Zone */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-        className="relative"
-      >
-        <div className="relative bg-[#f5576c]/5 backdrop-blur-xl rounded-3xl border border-[#f5576c]/20 p-8 overflow-hidden">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#f5576c] to-[#f093fb] flex items-center justify-center shadow-lg">
-              <Shield className="w-6 h-6 text-white" />
+        {/* SECTION 2: STRIPE TEST-MODE CONFIGURATION */}
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#f093fb] to-[#f5576c] flex items-center justify-center text-white shadow-md">
+                <CreditCard className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Stripe Test-Mode & Reconciliation</h2>
+                <p className="text-xs text-neutral-400">Live subscription billing and price ID mappings</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleTestStripe}
+              disabled={testingStripe}
+              className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-white flex items-center gap-1.5 transition-colors"
+            >
+              <RotateCw className={`w-3.5 h-3.5 text-[#f093fb] ${testingStripe ? 'animate-spin' : ''}`} />
+              <span>{testingStripe ? 'Testing...' : 'Test & Reconcile'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1.5">
+                Pro Plan Price ID (STRIPE_PRICE_PRO)
+              </label>
+              <input
+                type="text"
+                value={settings.stripePricePro}
+                onChange={(e) => setSettings({ ...settings, stripePricePro: e.target.value })}
+                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#667eea]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1.5">
+                Free Plan Price ID (STRIPE_PRICE_FREE)
+              </label>
+              <input
+                type="text"
+                value={settings.stripePriceFree}
+                onChange={(e) => setSettings({ ...settings, stripePriceFree: e.target.value })}
+                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#667eea]"
+              />
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-white">Nightly Automated Reconciliation</div>
+              <div className="text-[11px] text-neutral-400">Nightly cron job catches missed webhooks and syncs DB</div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.autoReconcile}
+                onChange={(e) => setSettings({ ...settings, autoReconcile: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#667eea]"></div>
+            </label>
+          </div>
+        </motion.div>
+
+        {/* SECTION 3: USAGE ALERTS & QUOTAS */}
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
+        >
+          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#4facfe] to-[#00f2fe] flex items-center justify-center text-white shadow-md">
+              <Bell className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-2xl font-display font-bold text-white mb-1">Danger Zone</h2>
-              <p className="text-sm text-neutral-400">Irreversible actions</p>
+              <h2 className="text-base font-bold text-white">Deduplicated Usage Alerts</h2>
+              <p className="text-xs text-neutral-400">Threshold alerts deduplicated per tenant, billing period, and metric type</p>
             </div>
           </div>
-          
-          <div className="space-y-4">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full flex items-center justify-between p-4 rounded-2xl bg-[#f5576c]/10 border border-[#f5576c]/30 hover:border-[#f5576c]/50 transition-all"
-            >
-              <div className="text-left">
-                <div className="text-white font-medium mb-1">Delete Account</div>
-                <div className="text-sm text-neutral-400">Permanently delete your account and all data</div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-neutral-300">Warning Alert Threshold</label>
+                <span className="text-xs font-mono font-bold text-[#818cf8]">{settings.alertThresholdPercent}%</span>
               </div>
-              <ChevronRight className="w-5 h-5 text-[#f5576c]" />
-            </motion.button>
-            
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full flex items-center justify-between p-4 rounded-2xl bg-[#f5576c]/10 border border-[#f5576c]/30 hover:border-[#f5576c]/50 transition-all"
-            >
-              <div className="text-left">
-                <div className="text-white font-medium mb-1">Export Data</div>
-                <div className="text-sm text-neutral-400">Download all your data in JSON format</div>
+              <input
+                type="range"
+                min="50"
+                max="95"
+                step="5"
+                value={settings.alertThresholdPercent}
+                onChange={(e) => setSettings({ ...settings, alertThresholdPercent: parseInt(e.target.value, 10) })}
+                className="w-full accent-[#667eea] bg-white/10 h-2 rounded-lg cursor-pointer"
+              />
+              <p className="text-[11px] text-neutral-500 mt-1">Dispatches deduplicated alert when tenant reaches this quota %.</p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-neutral-300">Critical Cap Threshold</label>
+                <span className="text-xs font-mono font-bold text-red-400">{settings.criticalThresholdPercent}%</span>
               </div>
-              <ChevronRight className="w-5 h-5 text-[#f5576c]" />
-            </motion.button>
+              <input
+                type="range"
+                min="90"
+                max="100"
+                step="5"
+                value={settings.criticalThresholdPercent}
+                onChange={(e) => setSettings({ ...settings, criticalThresholdPercent: parseInt(e.target.value, 10) })}
+                className="w-full accent-[#f5576c] bg-white/10 h-2 rounded-lg cursor-pointer"
+              />
+              <p className="text-[11px] text-neutral-500 mt-1">Rejects requests for non-overage plans when 100% is reached.</p>
+            </div>
           </div>
+        </motion.div>
+
+        {/* SECTION 4: DISPLAY PREFERENCES */}
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-[#0a0a0a]/80 backdrop-blur-2xl rounded-2xl border border-white/10 p-6 space-y-4"
+        >
+          <div className="flex items-center gap-3 pb-3 border-b border-white/5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#43e97b] to-[#38f9d7] flex items-center justify-center text-white shadow-md">
+              <Sliders className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white">Display & Telemetry Polling</h2>
+              <p className="text-xs text-neutral-400">Polling frequency and currency formatting</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1.5">Currency Display</label>
+              <select
+                value={settings.currency}
+                onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
+                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+              >
+                <option value="USD">USD ($) - Default</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1.5">Live Polling Interval (Seconds)</label>
+              <select
+                value={settings.pollIntervalSeconds}
+                onChange={(e) => setSettings({ ...settings, pollIntervalSeconds: parseInt(e.target.value, 10) })}
+                className="w-full px-4 py-2.5 bg-black/50 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-[#667eea]"
+              >
+                <option value="15">15 Seconds (Rapid Telemetry)</option>
+                <option value="30">30 Seconds (Standard)</option>
+                <option value="60">60 Seconds (Low Bandwidth)</option>
+              </select>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Submit Button */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white font-semibold text-sm hover:opacity-90 transition-opacity shadow-lg shadow-[#667eea]/20"
+          >
+            <Save className="w-4 h-4" />
+            <span>{saving ? 'Saving Changes...' : 'Save Settings'}</span>
+          </button>
         </div>
-      </motion.div>
+      </form>
     </div>
   );
 };
