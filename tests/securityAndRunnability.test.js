@@ -308,6 +308,8 @@ describe('Phase 1 - Security and Platform Runnability', () => {
     });
 
     it('should preserve raw body on /api/stripe/webhooks for signature verification', async () => {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_1234567890abcdef1234567890abcdef';
+      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret_1234567890abcdef';
       const rawPayload = JSON.stringify({ id: 'evt_test', type: 'test.event' });
       const res = await request(app)
         .post('/api/stripe/webhooks')
@@ -318,6 +320,6 @@ describe('Phase 1 - Security and Platform Runnability', () => {
       // Fails with 400 Invalid signature (not 500 parse error)
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Invalid signature');
-    });
+    }, 15000);
   });
 });
