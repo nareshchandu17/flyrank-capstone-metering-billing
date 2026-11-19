@@ -4,12 +4,13 @@
 
 @layer base {
   :root {
-    --color-primary: #533afd;
-    --color-primary-deep: #4434d4;
-    --color-primary-press: #2e2b8c;
-    --color-primary-soft: #665efd;
-    --color-primary-subdued: #b9b9f9;
-    --color-brand-dark: #1c1e54;
+    --color-primary: #D4FF28;
+    --color-primary-deep: #BEF218;
+    --color-primary-press: #A8DC10;
+    --color-primary-soft: #E6FFA0;
+    --color-primary-subdued: rgba(212, 255, 40, 0.2);
+    --color-primary-text: #0d253d;
+    --color-brand-dark: #111812;
     --color-ink: #0d253d;
     --color-ink-secondary: #273951;
     --color-ink-mute: #64748d;
@@ -41,7 +42,12 @@
   }
 
   /* Thin 300 weight is the brand's editorial signature */
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-weight: 300;
     color: #0d253d;
     font-feature-settings: "ss01" on;
@@ -67,13 +73,14 @@
   }
 
   ::selection {
-    background: rgba(83, 58, 253, 0.15);
+    background: rgba(212, 255, 40, 0.4);
     color: #0d253d;
   }
 }
 
 /* Tabular figures for financial accuracy */
-.tnum, [data-tabular="true"] {
+.tnum,
+[data-tabular="true"] {
   font-feature-settings: "tnum" on, "ss01" on;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.42px;
@@ -139,12 +146,12 @@
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
-  background: 
+  background:
     radial-gradient(ellipse 65% 55% at 5% 5%, rgba(245, 233, 212, 0.85) 0%, rgba(245, 233, 212, 0) 70%),
-    radial-gradient(ellipse 55% 45% at 30% 12%, rgba(249, 115, 22, 0.22) 0%, rgba(249, 115, 22, 0) 65%),
-    radial-gradient(ellipse 60% 50% at 65% 8%, rgba(185, 185, 249, 0.65) 0%, rgba(185, 185, 249, 0) 70%),
-    radial-gradient(ellipse 50% 55% at 85% 15%, rgba(234, 34, 97, 0.18) 0%, rgba(234, 34, 97, 0) 65%),
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(83, 58, 253, 0.16) 0%, rgba(83, 58, 253, 0) 75%),
+    radial-gradient(ellipse 55% 45% at 30% 12%, rgba(249, 115, 22, 0.18) 0%, rgba(249, 115, 22, 0) 65%),
+    radial-gradient(ellipse 60% 50% at 65% 8%, rgba(212, 255, 40, 0.28) 0%, rgba(212, 255, 40, 0) 70%),
+    radial-gradient(ellipse 50% 55% at 85% 15%, rgba(163, 230, 53, 0.18) 0%, rgba(163, 230, 53, 0) 65%),
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212, 255, 40, 0.16) 0%, rgba(212, 255, 40, 0) 75%),
     linear-gradient(180deg, #ffffff 0%, rgba(246, 249, 252, 0.95) 70%, #f6f9fc 100%);
 }
 
@@ -154,7 +161,7 @@
   left: 15%;
   width: 500px;
   height: 300px;
-  background: radial-gradient(circle, rgba(102, 94, 253, 0.28) 0%, rgba(102, 94, 253, 0) 70%);
+  background: radial-gradient(circle, rgba(212, 255, 40, 0.3) 0%, rgba(212, 255, 40, 0) 70%);
   filter: blur(50px);
   animation: meshFloat1 18s ease-in-out infinite alternate;
 }
@@ -171,54 +178,70 @@
 }
 
 @keyframes meshFloat1 {
-  0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(40px, 25px) scale(1.08); }
-  100% { transform: translate(-30px, 15px) scale(0.95); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate(40px, 25px) scale(1.08);
+  }
+
+  100% {
+    transform: translate(-30px, 15px) scale(0.95);
+  }
 }
 
 @keyframes meshFloat2 {
-  0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(-35px, 30px) scale(1.05); }
-  100% { transform: translate(25px, -15px) scale(0.98); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate(-35px, 30px) scale(1.05);
+  }
+
+  100% {
+    transform: translate(25px, -15px) scale(0.98);
+  }
 }
 
 /* Stripi Pill Buttons */
 .btn-primary-pill {
-  background-color: #533afd;
-  color: #ffffff;
+  background-color: #D4FF28;
+  color: #0d253d;
   border-radius: 9999px;
   padding: 8px 18px;
-  font-size: 15px;
-  font-weight: 400;
+  font-size: 14.5px;
+  font-weight: 600;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid transparent;
-  box-shadow: 0 1px 3px rgba(0, 55, 112, 0.12);
-  transition: all 0.15s ease-in-out;
+  border: 1px solid #C4EF1E;
+  box-shadow: 0 1px 3px rgba(0, 55, 112, 0.08), 0 2px 8px -2px rgba(212, 255, 40, 0.45);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
 }
 
 .btn-primary-pill:hover {
-  background-color: #4434d4;
-  box-shadow: 0 2px 6px rgba(83, 58, 253, 0.25);
+  background-color: #BEF218;
+  box-shadow: 0 4px 14px rgba(212, 255, 40, 0.55);
   transform: translateY(-0.5px);
 }
 
 .btn-primary-pill:active {
-  background-color: #2e2b8c;
+  background-color: #A8DC10;
   transform: translateY(0.5px);
 }
 
 .btn-secondary-pill {
   background-color: #ffffff;
-  color: #533afd;
+  color: #0d253d;
   border-radius: 9999px;
   padding: 8px 18px;
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -232,8 +255,8 @@
 
 .btn-secondary-pill:hover {
   background-color: #f6f9fc;
-  border-color: #a8c3de;
-  color: #4434d4;
+  border-color: #A3E635;
+  color: #0d253d;
   transform: translateY(-0.5px);
 }
 
@@ -243,12 +266,12 @@
 }
 
 .btn-on-dark-pill {
-  background-color: #1c1e54;
+  background-color: #111812;
   color: #ffffff;
   border-radius: 9999px;
   padding: 8px 18px;
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -261,19 +284,20 @@
 
 .btn-on-dark-pill:hover {
   background-color: #0d253d;
-  border-color: #533afd;
+  border-color: #D4FF28;
+  color: #D4FF28;
 }
 
 /* Stripi Soft Pill Tag */
 .pill-tag-soft {
-  background-color: rgba(185, 185, 249, 0.45);
-  color: #4434d4;
+  background-color: rgba(212, 255, 40, 0.22);
+  color: #3F6212;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.1px;
   padding: 3px 9px;
   border-radius: 9999px;
-  border: 1px solid rgba(83, 58, 253, 0.2);
+  border: 1px solid rgba(163, 230, 53, 0.4);
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -293,8 +317,8 @@
 
 .text-input-stripi:focus {
   outline: none;
-  border-color: #533afd;
-  box-shadow: 0 0 0 3px rgba(83, 58, 253, 0.12);
+  border-color: #A3E635;
+  box-shadow: 0 0 0 3px rgba(212, 255, 40, 0.28);
 }
 
 /* Stripi Cards */
@@ -327,4 +351,3 @@
   border: 1px solid #e3e8ee;
   box-shadow: 0 1px 3px rgba(0, 55, 112, 0.08);
 }
-

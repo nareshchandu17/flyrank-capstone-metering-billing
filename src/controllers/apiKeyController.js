@@ -5,7 +5,7 @@ class ApiKeyController {
    * Helper to resolve tenant ID and enforce scoping
    */
   resolveTenantId(req) {
-    if (req.isAdmin) {
+    if (req.isPlatformAdmin || req.isAdmin) {
       return req.params.tenant_id || req.body.tenant_id || req.tenantId;
     }
     // For non-admin, target must match their own tenantId

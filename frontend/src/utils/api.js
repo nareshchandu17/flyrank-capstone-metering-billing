@@ -1,215 +1,388 @@
 import axios from 'axios';
 
-// Dynamically determine the backend API URL
+// Resolve backend base URL
 const getBaseUrl = () => {
-  if (typeof window !== 'undefined') {
-    // If environment variable is configured, use it
     if (import.meta.env.VITE_API_BASE_URL) {
       return import.meta.env.VITE_API_BASE_URL;
     }
-    // Default to port 3001 on the same host
-    return `${window.location.protocol}//${window.location.hostname}:3001/api`;
-  }
-  return 'http://localhost:3001/api';
-};
-
-const API_BASE_URL = getBaseUrl();
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Interceptor to inject admin / tenant auth token into every request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token') || localStorage.getItem('admin_api_key') || 'admin-secret-key';
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// ==========================================
-// 1. OVERVIEW & METRICS
-// ==========================================
-export const getMetrics = async () => {
-  const response = await api.get('/admin/metrics');
-  return response.data;
-};
-
-export const getRealTimeUsage = async () => {
-  const response = await api.get('/admin/usage/realtime');
-  return response.data;
-};
-
-// ==========================================
-// 2. TENANTS MANAGEMENT
-// ==========================================
-export const getTenants = async () => {
-  const response = await api.get('/admin/tenants');
-  return response.data;
-};
-
-export const getTenantDetails = async (id) => {
-  const response = await api.get(`/tenants/${id}`);
-  return response.data;
-};
-
-export const getTenantUsage = async (id) => {
-  const response = await api.get(`/usage/${id}`);
-  return response.data;
-};
-
-export const createTenant = async (tenantData) => {
-  const response = await api.post('/admin/tenants', tenantData);
-  return response.data;
-};
-
-export const updateTenant = async (id, tenantData) => {
-  const response = await api.put(`/admin/tenants/${id}`, tenantData);
-  return response.data;
-};
-
-export const deleteTenant = async (id) => {
-  const response = await api.delete(`/admin/tenants/${id}`);
-  return response.data;
-};
-
-// ==========================================
-// 3. USAGE & ANALYTICS
-// ==========================================
-export const getUsageHistory = async (params = {}) => {
-  const response = await api.get('/admin/usage/history', { params });
-  return response.data;
-};
-
-export const getUsageStats = async () => {
-  const response = await api.get('/usage/stats');
-  return response.data;
-};
-
-export const recordUsage = async (usageData) => {
-  const response = await api.post('/usage', usageData);
-  return response.data;
-};
-
-// Helper to export usage history to CSV
-export const exportUsageToCsv = (historyData, filename = 'usage-events-export.csv') => {
-  if (!historyData || historyData.length === 0) {
-    throw new Error('No usage data available to export');
-  }
-
-  const headers = ['ID', 'Date', 'Time', 'Tenant', 'Metric Type', 'Quantity', 'Cost ($)', 'Idempotency Key'];
-  const rows = historyData.map(item => [
-    item.id,
-    item.date,
-    item.time || '',
-    `"${(item.tenant || '').replace(/"/g, '""')}"`,
-    item.metric,
-    item.value,
-    item.cost || '0.0000',
-    item.idempotency_key || ''
-  ]);
-
-  const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
-
-// ==========================================
-// 4. API KEYS MANAGEMENT
-// ==========================================
-export const getApiKeys = async (tenantId) => {
-  const response = await api.get(`/tenants/${tenantId}/api-keys`);
-  return response.data.data || response.data;
-};
-
-export const createApiKey = async (tenantId, name = 'Production Key') => {
-  const response = await api.post(`/tenants/${tenantId}/api-keys`, { name });
-  return response.data.data || response.data;
-};
-
-export const rotateApiKey = async (tenantId, keyId) => {
-  const response = await api.post(`/tenants/${tenantId}/api-keys/${keyId}/rotate`);
-  return response.data.data || response.data;
-};
-
-export const revokeApiKey = async (tenantId, keyId) => {
-  const response = await api.post(`/tenants/${tenantId}/api-keys/${keyId}/revoke`);
-  return response.data.data || response.data;
-};
-
-// ==========================================
-// 5. BILLING & INVOICES
-// ==========================================
-export const getInvoices = async (tenantId = null) => {
-  const url = tenantId ? `/invoices/${tenantId}` : '/history/invoices';
-  try {
-    const response = await api.get(url);
-    return response.data.data || response.data;
-  } catch (err) {
-    // Fallback to /invoices if history routes differ
-    const fallbackRes = await api.get(tenantId ? `/invoices/${tenantId}` : '/invoices');
-    return fallbackRes.data.data || fallbackRes.data;
-  }
-};
-
-export const getInvoiceDetail = async (invoiceId) => {
-  const response = await api.get(`/invoices/detail/${invoiceId}`);
-  return response.data;
-};
-
-export const generateInvoice = async (tenantId, billingPeriod) => {
-  const response = await api.post('/invoices/generate', {
-    tenant_id: tenantId,
-    billing_period: billingPeriod,
-  });
-  return response.data;
-};
-
-export const reconcileSubscriptions = async (tenantId = null) => {
-  const url = tenantId ? `/stripe/reconcile/${tenantId}` : '/stripe/reconcile';
-  const response = await api.post(url);
-  return response.data;
-};
-
-// ==========================================
-// 6. SETTINGS MANAGEMENT
-// ==========================================
-export const getSettings = () => {
-  const saved = localStorage.getItem('usage_metering_settings');
-  if (saved) {
-    try {
-      return JSON.parse(saved);
-    } catch (e) {
-      // Fallback
-    }
-  }
-  return {
-    adminApiKey: localStorage.getItem('admin_api_key') || 'admin-secret-key',
-    alertThresholdPercent: 80,
-    stripeLiveMode: false,
-    autoReconcile: true,
-    currency: 'USD',
-    webhookNotifications: true
+    return '/api';
   };
-};
 
-export const saveSettings = (newSettings) => {
-  localStorage.setItem('usage_metering_settings', JSON.stringify(newSettings));
-  if (newSettings.adminApiKey) {
-    localStorage.setItem('admin_api_key', newSettings.adminApiKey);
-  }
-  return { success: true, message: 'Settings saved successfully' };
-};
+  const API_BASE_URL = getBaseUrl();
 
-export default api;
+  const api = axios.create({
+    baseURL: API_BASE_URL,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+      // Dynamic Auth0 token getter and active tenant tracking
+      let tokenGetter = null;
+      let activeTenantId = null;
+
+      export const setTokenGetter = (fn) => {
+        tokenGetter = fn;
+      };
+
+      export const setActiveTenantHeader = (tenantId) => {
+        activeTenantId = tenantId;
+      };
+
+      // Request Interceptor: Attach Auth0 Bearer token and active tenant header
+      api.interceptors.request.use(async (config) => {
+        if (tokenGetter && typeof tokenGetter === 'function') {
+          try {
+            const token = await tokenGetter();
+            if (token) {
+              config.headers.Authorization = `Bearer ${token}`;
+            }
+          } catch (err) {
+            console.warn('Error fetching token for request interceptor:', err);
+          }
+        }
+
+        if (activeTenantId && !config.headers['X-Tenant-ID']) {
+          config.headers['X-Tenant-ID'] = activeTenantId;
+        }
+
+        return config;
+      });
+
+      // Response Interceptor: Handle 401 unauthorized gracefully
+      api.interceptors.response.use(
+        (response) => response,
+        (error) => {
+          if (error.response?.status === 401) {
+            console.warn('Unauthorized API response - session may be expired or invalid');
+          }
+          return Promise.reject(error);
+        }
+      );
+
+      // ==========================================
+      // 1. AUTH & USER PROFILE
+      // ==========================================
+      export const getMe = async () => {
+        const response = await api.get('/auth/me');
+        return response.data;
+      };
+
+      export const acceptInvitation = async (token) => {
+        const response = await api.post('/auth/invitations/accept', { token });
+        return response.data;
+      };
+
+      // ==========================================
+      // 2. OVERVIEW & METRICS (Platform Admin / Scoped)
+      // ==========================================
+      export const getMetrics = async () => {
+        try {
+          const response = await api.get('/admin/metrics');
+          return response.data;
+        } catch (err) {
+          if (err.response?.status === 403) {
+            try {
+              const fallback = await api.get('/dashboard/stats');
+              return fallback.data.data || fallback.data;
+            } catch {
+              return null;
+            }
+          }
+          throw err;
+        }
+      };
+
+      export const getRealTimeUsage = async () => {
+        try {
+          const response = await api.get('/admin/usage/realtime');
+          return response.data;
+        } catch (err) {
+          if (err.response?.status === 403) {
+            try {
+              const fallback = await api.get('/usage/events');
+              return fallback.data.data || [];
+            } catch {
+              return [];
+            }
+          }
+          throw err;
+        }
+      };
+
+      export const getDashboardStats = async (tenantId) => {
+        const response = await api.get('/dashboard/stats', {
+          headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
+        });
+        return response.data.data;
+      };
+
+      // ==========================================
+      // 3. TENANTS MANAGEMENT
+      // ==========================================
+      export const getTenants = async () => {
+        try {
+          const response = await api.get('/tenants');
+          return response.data.tenants || response.data || [];
+        } catch (err) {
+          if (err.response?.status === 403) {
+            try {
+              const me = await getMe();
+              return (me.memberships || []).map(m => ({
+                id: m.tenant_id,
+                name: m.tenant_name,
+                plan: m.plan_name || 'Free',
+                status: m.membership_status || 'active',
+                role: m.role
+              }));
+            } catch {
+              return [];
+            }
+          }
+          throw err;
+        }
+      };
+
+        export const getTenant = async (id) => {
+          const response = await api.get(`/tenants/${id}`);
+          return response.data;
+        };
+
+        export const getTenantUsage = async (id) => {
+          const response = await api.get(`/tenants/${id}/usage`);
+          return response.data;
+        };
+
+        export const createTenant = async (tenantData) => {
+          const response = await api.post('/tenants', tenantData);
+          return response.data;
+        };
+
+        export const updateTenant = async (id, tenantData) => {
+          const response = await api.put(`/tenants/${id}`, tenantData);
+          return response.data;
+        };
+
+        export const deleteTenant = async (id) => {
+          const response = await api.delete(`/tenants/${id}`);
+          return response.data;
+        };
+
+        // ==========================================
+        // 4. MEMBERSHIP & INVITATIONS
+        // ==========================================
+          export const getTenantMembers = async (tenantId) => {
+            const response = await api.get(`/tenants/${tenantId}/members`);
+            return response.data;
+          };
+
+            export const updateTenantMember = async (tenantId, memberId, data) => {
+              const response = await api.put(`/tenants/${tenantId}/members/${memberId}`, data);
+              return response.data;
+            };
+
+              export const removeTenantMember = async (tenantId, memberId) => {
+                const response = await api.delete(`/tenants/${tenantId}/members/${memberId}`);
+                return response.data;
+              };
+
+                export const getTenantInvitations = async (tenantId) => {
+                  const response = await api.get(`/tenants/${tenantId}/invitations`);
+                  return response.data;
+                };
+
+                export const inviteTenantMember = async (tenantId, invitationData) => {
+                  const response = await api.post(`/tenants/${tenantId}/invitations`, invitationData);
+                  return response.data;
+                };
+
+                export const revokeTenantInvitation = async (tenantId, invitationId) => {
+                  const response = await api.delete(`/tenants/${tenantId}/invitations/${invitationId}`);
+                  return response.data;
+                };
+
+                // ==========================================
+                // 5. API KEYS (Scoped to active tenant)
+                // ==========================================
+                export const getApiKeys = async (tenantId) => {
+                  const target = tenantId || activeTenantId;
+                  if (!target) return [];
+                  const response = await api.get(`/tenants/${target}/api-keys`);
+                  return response.data.data || response.data;
+                };
+
+                  export const createApiKey = async (tenantId, name) => {
+                    const target = tenantId || activeTenantId;
+                    const response = await api.post(`/tenants/${target}/api-keys`, { name });
+                    return response.data.data || response.data;
+                  };
+
+                  export const rotateApiKey = async (tenantId, keyId) => {
+                    const target = tenantId || activeTenantId;
+                    const response = await api.post(`/tenants/${target}/api-keys/${keyId}/rotate`);
+                    return response.data.data || response.data;
+                  };
+
+                  export const revokeApiKey = async (tenantId, keyId) => {
+                    const target = tenantId || activeTenantId;
+                    const response = await api.delete(`/tenants/${target}/api-keys/${keyId}`);
+                    return response.data;
+                  };
+
+                  // ==========================================
+                  // 6. USAGE & ANALYTICS
+                  // ==========================================
+                  export const getUsageStats = async (tenantId) => {
+                    const response = await api.get('/usage/stats', {
+                      headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
+                    });
+                    return response.data.data;
+                  };
+
+                  export const getUsageHistory = async (params = {}) => {
+                    const response = await api.get('/admin/usage/history', { params });
+                    return response.data;
+                  };
+
+                  export const recordUsage = async (usageData) => {
+                    const response = await api.post('/usage', usageData);
+                    return response.data;
+                  };
+
+                  export const exportUsageToCsv = (events, filename = 'usage_export.csv') => {
+                    if (!events || events.length === 0) return;
+                    const headers = ['ID', 'Tenant', 'Type', 'Quantity', 'Date'];
+                    const rows = events.map(e => [
+                      e.id,
+                      e.tenant_name || e.tenant_id,
+                      e.usage_type,
+                      e.quantity,
+                      e.created_at
+                    ]);
+                    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', filename);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  };
+
+                  export const getUsageEvents = async (tenantId, limit = 50, offset = 0) => {
+                    const target = tenantId || activeTenantId;
+                    const response = await api.get(`/usage/events/${target}`, {
+                      params: { limit, offset }
+                    });
+                    return response.data.data || response.data;
+                  };
+
+                  export const getTopEndpoints = async (tenantId) => {
+                    const response = await api.get('/usage/endpoints', {
+                      headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
+                    });
+                    return response.data.data;
+                  };
+
+                  export const getSystemResources = async () => {
+                    const response = await api.get('/usage/resources');
+                    return response.data.data;
+                  };
+
+                  // ==========================================
+                  // 7. INVOICING & BILLING
+                  // ==========================================
+                    export const getInvoices = async (tenantId) => {
+                      const response = await api.get('/history/invoices', {
+                        headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
+                      });
+                      return response.data.data || response.data;
+                    };
+
+                      export const getInvoiceDetail = async (id) => {
+                        const response = await api.get(`/invoices/detail/${id}`);
+                        return response.data;
+                      };
+
+                      export const generateInvoice = async (tenantId, billingPeriod) => {
+                        const response = await api.post('/invoices/generate', {
+                          tenant_id: tenantId,
+                          billing_period: billingPeriod
+                        });
+                        return response.data;
+                      };
+
+                        export const getTransactions = async (tenantId, limit = 50, offset = 0) => {
+                          const response = await api.get('/history/transactions', {
+                            params: { limit, offset },
+                            headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
+                          });
+                          return response.data.data;
+                        };
+
+                        export const getBillingSummary = async (tenantId) => {
+                          const response = await api.get('/history/summary', {
+                            headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
+                          });
+                          return response.data.data;
+                        };
+
+                        // ==========================================
+                        // 8. STRIPE CHECKOUT & RECONCILIATION
+                        // ==========================================
+                        export const createCheckoutSession = async (tenantId, planName) => {
+                          const response = await api.post('/stripe/checkout', {
+                            tenant_id: tenantId,
+                            plan_name: planName
+                          });
+                          return response.data;
+                        };
+
+                        export const reconcileSubscriptions = async (tenantId) => {
+                          const url = tenantId ? `/stripe/reconcile/${tenantId}` : '/stripe/reconcile';
+                          const response = await api.post(url, tenantId ? { tenant_id: tenantId } : {});
+                          return response.data;
+                        };
+
+                        export const getWebhookEvents = async (status, limit = 50) => {
+                          const response = await api.get('/stripe/webhooks/events', {
+                            params: { status, limit }
+                          });
+                          return response.data;
+                        };
+
+                        // ==========================================
+                        // 9. AUDIT LOGS
+                        // ==========================================
+                        export const getAuditLogs = async (tenantId) => {
+                          const url = tenantId ? `/tenants/${tenantId}/audit-logs` : '/admin/audit-logs';
+                          const response = await api.get(url);
+                          return response.data;
+                        };
+
+                        // Client Settings (theme, alert preferences) - completely removed hardcoded admin credentials
+                        export const getSettings = () => {
+                          const saved = localStorage.getItem('usage_metering_settings');
+                          if (saved) {
+                            try {
+                              return JSON.parse(saved);
+                            } catch {
+                              // Fallback
+                            }
+                          }
+                          return {
+                            alertThresholdPercent: 80,
+                            stripeLiveMode: false,
+                            autoReconcile: true,
+                            currency: 'USD',
+                            webhookNotifications: true
+                          };
+                        };
+
+                        export const saveSettings = (newSettings) => {
+                          localStorage.setItem('usage_metering_settings', JSON.stringify(newSettings));
+                          return { success: true, message: 'Settings saved successfully' };
+                        };
+
+                        export default api;

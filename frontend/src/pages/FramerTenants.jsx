@@ -1,35 +1,31 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  getTenants, 
-  createTenant, 
-  updateTenant, 
-  deleteTenant, 
+import {
+  getTenants,
+  createTenant,
+  updateTenant,
+  deleteTenant,
   getTenantUsage,
   getApiKeys,
   createApiKey,
   rotateApiKey,
   revokeApiKey
 } from '../utils/api';
-import { 
-  Search, 
-  Plus, 
-  Users, 
-  CheckCircle2, 
-  AlertTriangle, 
-  X, 
-  Trash2, 
-  Edit2, 
-  Key, 
-  Copy, 
-  Check, 
-  RefreshCw, 
-  ShieldAlert, 
-  ShieldCheck, 
-  Activity,
-  Layers,
-  Zap,
-  ArrowRight
+import {
+  Search,
+  Plus,
+  Users,
+  CheckCircle2,
+  AlertTriangle,
+  X,
+  Trash2,
+  Edit2,
+  Key,
+  Copy,
+  Check,
+  ShieldAlert,
+  ArrowRight,
+  Building2
 } from 'lucide-react';
 
 const FramerTenants = () => {
@@ -37,12 +33,15 @@ const FramerTenants = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  
+
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isInspectOpen, setIsInspectOpen] = useState(false);
-  
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [tenantToDelete, setTenantToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   // Active tenant for inspect/edit
   const [activeTenant, setActiveTenant] = useState(null);
   const [tenantUsage, setTenantUsage] = useState(null);
@@ -157,22 +156,31 @@ const FramerTenants = () => {
     }
   };
 
-  // Delete tenant
-  const handleDeleteTenant = async (tenant) => {
-    if (!window.confirm(`Are you sure you want to delete "${tenant.name}"? This action will revoke all keys and purge historical events.`)) {
-      return;
-    }
+  // Open delete confirmation modal
+  const handlePromptDelete = (tenant) => {
+    setTenantToDelete(tenant);
+    setIsDeleteOpen(true);
+  };
+
+  // Confirm delete tenant
+  const handleConfirmDelete = async () => {
+    if (!tenantToDelete) return;
 
     try {
-      await deleteTenant(tenant.id);
-      showToast(`Tenant "${tenant.name}" deleted successfully`);
+      setDeleting(true);
+      await deleteTenant(tenantToDelete.id);
+      showToast(`Tenant "${tenantToDelete.name}" deleted successfully`);
       fetchTenants();
-      if (isInspectOpen && activeTenant?.id === tenant.id) {
+      if (isInspectOpen && activeTenant?.id === tenantToDelete.id) {
         setIsInspectOpen(false);
       }
+      setIsDeleteOpen(false);
+      setTenantToDelete(null);
     } catch (error) {
       console.error('Error deleting tenant:', error);
       showToast(error.message || 'Failed to delete tenant', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -238,7 +246,7 @@ const FramerTenants = () => {
 
   // Filter tenants
   const filteredTenants = tenants.filter(t => {
-    const matchesSearch = 
+    const matchesSearch =
       t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (t.id && t.id.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -256,19 +264,18 @@ const FramerTenants = () => {
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-full text-xs font-medium shadow-level-2 flex items-center gap-2 border ${
-              toast.type === 'error'
-                ? 'bg-white text-[#ea2261] border-[#ea2261]/30'
-                : 'bg-[#1c1e54] text-white border-[#533afd]/30'
-            }`}
+            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-full text-xs font-medium shadow-level-2 flex items-center gap-2 border ${toast.type === 'error'
+              ? 'bg-white text-[#ea2261] border-[#ea2261]/30'
+              : 'bg-[#111812] text-white border-[#D4FF28]/40'
+              }`}
           >
-            {toast.type === 'error' ? <AlertTriangle className="w-4 h-4 text-[#ea2261]" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981]" />}
+            {toast.type === 'error' ? <AlertTriangle className="w-4 h-4 text-[#ea2261]" /> : <CheckCircle2 className="w-4 h-4 text-[#D4FF28]" />}
             <span>{toast.message}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Header & Single Indigo CTA */}
+      {/* Header & Single CTA */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-2">
         <div>
           <div className="flex items-center gap-2 mb-2">
@@ -313,11 +320,10 @@ const FramerTenants = () => {
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={`px-3 py-1.5 rounded-full text-xs font-normal transition-all capitalize ${
-                statusFilter === status
-                  ? 'bg-[#533afd] text-white font-medium shadow-sm'
-                  : 'bg-white text-[#273951] hover:bg-[#f6f9fc] border border-[#e3e8ee]'
-              }`}
+              className={`px-3 py-1.5 rounded-full text-xs font-normal transition-all capitalize ${statusFilter === status
+                ? 'bg-[#D4FF28] text-[#0d253d] font-semibold border border-[#C4EF1E] shadow-sm'
+                : 'bg-white text-[#273951] hover:bg-[#f6f9fc] border border-[#e3e8ee]'
+                }`}
             >
               {status}
             </button>
@@ -341,96 +347,149 @@ const FramerTenants = () => {
             </thead>
             <tbody className="divide-y divide-[#e3e8ee]">
               {loading ? (
-                <tr>
-                  <td colSpan="6" className="py-12 text-center text-[#64748d]">
-                    <div className="w-6 h-6 border-2 border-[#533afd] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                    Fetching tenant records...
-                  </td>
-                </tr>
-              ) : filteredTenants.length > 0 ? (
-                filteredTenants.map((tenant) => {
-                  const status = tenant.status || 'active';
-                  return (
-                    <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
-                      <td className="py-4 px-6">
-                        <div 
-                          onClick={() => handleInspect(tenant)}
-                          className="cursor-pointer group flex items-center gap-3"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-[#533afd]/10 text-[#533afd] font-medium flex items-center justify-center text-xs shrink-0">
-                            {tenant.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="font-normal text-[#0d253d] group-hover:text-[#533afd] transition-colors flex items-center gap-1.5">
-                              <span>{tenant.name}</span>
-                              <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
-                            <div className="text-xs text-[#64748d]">{tenant.email}</div>
-                            <div className="text-[11px] text-[#61718a] font-mono tnum mt-0.5">{tenant.id}</div>
-                          </div>
-                        </div>
-                      </td>
+                    [...Array(4)].map((_, idx) => (
+              <tr key={`tenant-skel-${idx}`} className="animate-pulse">
+                <td className="py-4 px-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-[#e3e8ee] shrink-0" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-3.5 bg-[#e3e8ee] rounded w-28" />
+                      <div className="h-2.5 bg-[#e3e8ee] rounded w-40" />
+                    </div>
+                  </div>
+                </td>
+                <td className="py-4 px-6">
+                  <div className="h-5 bg-[#e3e8ee] rounded-full w-14" />
+                </td>
+                <td className="py-4 px-6">
+                  <div className="h-5 bg-[#e3e8ee] rounded-full w-16" />
+                </td>
+                <td className="py-4 px-6 text-right">
+                  <div className="h-4 bg-[#e3e8ee] rounded w-16 ml-auto" />
+                </td>
+                <td className="py-4 px-6 text-right">
+                  <div className="h-4 bg-[#e3e8ee] rounded w-12 ml-auto" />
+                </td>
+                <td className="py-4 px-6">
+                  <div className="flex items-center justify-center gap-1">
+                    <div className="w-6 h-6 bg-[#e3e8ee] rounded-full" />
+                    <div className="w-6 h-6 bg-[#e3e8ee] rounded-full" />
+                    <div className="w-6 h-6 bg-[#e3e8ee] rounded-full" />
+                  </div>
+                </td>
+              </tr>
+              ))
+                  ) : filteredTenants.length > 0 ? (
+                    filteredTenants.map((tenant) => {
+                      const status = tenant.status || 'active';
+              return (
+              <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
+                <td className="py-4 px-6">
+                  <div
+                    onClick={() => handleInspect(tenant)}
+                    className="cursor-pointer group flex items-center gap-3"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-[#D4FF28]/25 text-[#3F6212] font-semibold flex items-center justify-center text-xs shrink-0 border border-[#C4EF1E]/40">
+                      {tenant.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="font-normal text-[#0d253d] group-hover:text-[#3F6212] transition-colors flex items-center gap-1.5">
+                        <span>{tenant.name}</span>
+                        <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <div className="text-xs text-[#64748d]">{tenant.email}</div>
+                      <div className="text-[11px] text-[#61718a] font-mono tnum mt-0.5">{tenant.id}</div>
+                    </div>
+                  </div>
+                </td>
 
-                      <td className="py-4 px-6">
-                        <span className="pill-tag-soft">
-                          {tenant.plan || 'Free'}
-                        </span>
-                      </td>
+                <td className="py-4 px-6">
+                  <span className="pill-tag-soft">
+                    {tenant.plan || 'Free'}
+                  </span>
+                </td>
 
-                      <td className="py-4 px-6">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-normal ${
-                          status === 'active' 
-                            ? 'bg-[#10b981]/10 text-[#059669]' 
-                            : 'bg-[#ea2261]/10 text-[#ea2261]'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${status === 'active' ? 'bg-[#10b981]' : 'bg-[#ea2261]'}`} />
-                          <span className="capitalize">{status}</span>
-                        </span>
-                      </td>
+                <td className="py-4 px-6">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-normal ${status === 'active'
+                    ? 'bg-[#10b981]/10 text-[#059669]'
+                    : 'bg-[#ea2261]/10 text-[#ea2261]'
+                    }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${status === 'active' ? 'bg-[#10b981]' : 'bg-[#ea2261]'}`} />
+                    <span className="capitalize">{status}</span>
+                  </span>
+                </td>
 
-                      <td className="py-4 px-6 text-right font-mono tnum text-[#0d253d]">
-                        {(tenant.usage || 0).toLocaleString()}
-                      </td>
+                <td className="py-4 px-6 text-right font-mono tnum text-[#0d253d]">
+                  {(tenant.usage || 0).toLocaleString()}
+                </td>
 
-                      <td className="py-4 px-6 text-right font-medium text-[#0d253d] font-mono tnum">
-                        ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
-                      </td>
+                <td className="py-4 px-6 text-right font-medium text-[#0d253d] font-mono tnum">
+                  ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
+                </td>
 
-                      <td className="py-4 px-6 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => handleInspect(tenant)}
-                            className="p-1.5 rounded-full text-[#64748d] hover:text-[#533afd] hover:bg-[#533afd]/10 transition-colors"
-                            title="Inspect Usage & API Keys"
-                          >
-                            <Key className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEdit(tenant)}
-                            className="p-1.5 rounded-full text-[#64748d] hover:text-[#0d253d] hover:bg-[#f6f9fc] transition-colors"
-                            title="Edit Plan"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteTenant(tenant)}
-                            className="p-1.5 rounded-full text-[#64748d] hover:text-[#ea2261] hover:bg-[#ea2261]/10 transition-colors"
-                            title="Delete Tenant"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                <td className="py-4 px-6 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <button
+                      onClick={() => handleInspect(tenant)}
+                      className="p-1.5 rounded-full text-[#64748d] hover:text-[#3F6212] hover:bg-[#D4FF28]/25 transition-colors"
+                      title="Inspect Usage & API Keys"
+                    >
+                      <Key className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenEdit(tenant)}
+                      className="p-1.5 rounded-full text-[#64748d] hover:text-[#0d253d] hover:bg-[#f6f9fc] transition-colors"
+                      title="Edit Plan"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handlePromptDelete(tenant)}
+                      className="p-1.5 rounded-full text-[#64748d] hover:text-[#ea2261] hover:bg-[#ea2261]/10 transition-colors"
+                      title="Delete Tenant"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              );
+                    })
               ) : (
-                <tr>
-                  <td colSpan="6" className="py-12 text-center text-[#64748d] text-sm">
-                    No accounts matching your search query.
+              <tr>
+                  <td colSpan="6" className="py-16 text-center">
+                    <div className="max-w-sm mx-auto text-center">
+                      <div className="w-12 h-12 rounded-2xl bg-[#f6f9fc] border border-[#e3e8ee] text-slate-400 flex items-center justify-center mx-auto mb-3 shadow-sm">
+                        <Building2 className="w-6 h-6 text-[#4D7C0F]" />
+                      </div>
+                      <h3 className="text-sm font-semibold text-[#0d253d] mb-1">
+                        {searchTerm ? `No tenants match "${searchTerm}"` : 'No Tenants Provisioned Yet'}
+                      </h3>
+                      <p className="text-xs text-[#64748d] mb-4 leading-relaxed">
+                        {searchTerm
+                          ? 'Try adjusting your search criteria or clear the query filter.'
+                          : 'Tenants provide strictly isolated multi-tenant workspaces for quota meters, billing, and API keys.'}
+                      </p>
+                      {searchTerm ? (
+                        <button
+                          onClick={() => setSearchTerm('')}
+                          className="btn-secondary-pill text-xs py-1.5 px-3"
+                        >
+                          Clear Search
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setIsModalOpen(true)}
+                          className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Provision First Tenant
+                        </button>
+                      )}
+                    </div>
                   </td>
-                </tr>
-              )}
+              </tr>
+                  )}
             </tbody>
           </table>
         </div>
@@ -440,7 +499,7 @@ const FramerTenants = () => {
       <AnimatePresence>
         {isInspectOpen && activeTenant && (
           <div className="fixed inset-0 z-50 overflow-hidden">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -480,7 +539,7 @@ const FramerTenants = () => {
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="p-4 rounded-xl bg-[#1c1e54] text-white border border-[#533afd]/50"
+                      className="p-4 rounded-xl bg-[#111812] text-white border border-[#D4FF28]/50"
                     >
                       <div className="flex items-center gap-2 mb-2">
                         <ShieldAlert className="w-4 h-4 text-[#ea2261]" />
@@ -589,11 +648,10 @@ const FramerTenants = () => {
                                 <td className="py-2.5 px-3 text-[#0d253d] font-bold tnum">{key.prefix}...</td>
                                 <td className="py-2.5 px-3 text-[#273951] font-sans">{key.name}</td>
                                 <td className="py-2.5 px-3 font-sans">
-                                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] ${
-                                    key.status === 'active' 
-                                      ? 'bg-[#10b981]/10 text-[#059669]' 
-                                      : 'bg-[#ea2261]/10 text-[#ea2261]'
-                                  }`}>
+                                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] ${key.status === 'active'
+                                    ? 'bg-[#10b981]/10 text-[#059669]'
+                                    : 'bg-[#ea2261]/10 text-[#ea2261]'
+                                    }`}>
                                     {key.status}
                                   </span>
                                 </td>
@@ -602,7 +660,7 @@ const FramerTenants = () => {
                                     <div className="flex items-center justify-end gap-1.5">
                                       <button
                                         onClick={() => handleRotateKey(key.id)}
-                                        className="text-[11px] text-[#533afd] hover:underline"
+                                        className="text-[11px] text-[#3F6212] font-medium hover:underline"
                                       >
                                         Rotate
                                       </button>
@@ -834,6 +892,106 @@ const FramerTenants = () => {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DELETE TENANT CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {isDeleteOpen && tenantToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!deleting) {
+                  setIsDeleteOpen(false);
+                  setTenantToDelete(null);
+                }
+              }}
+              className="absolute inset-0 bg-[#0d253d]/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative card-stripi bg-white p-6 max-w-md w-full shadow-level-3"
+            >
+              <div className="flex items-start justify-between pb-4 border-b border-[#e3e8ee] mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[#ea2261]/10 text-[#ea2261] flex items-center justify-center shrink-0">
+                    <Trash2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-[#0d253d]">Delete Tenant</h3>
+                    <p className="text-xs text-[#64748d]">Permanent action confirmation</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => {
+                    setIsDeleteOpen(false);
+                    setTenantToDelete(null);
+                  }}
+                  className="text-[#64748d] hover:text-[#0d253d] disabled:opacity-40"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-sm text-[#273951] leading-relaxed">
+                Are you sure you want to delete <span className="font-semibold text-[#0d253d]">"{tenantToDelete.name}"</span>?
+              </p>
+
+              <div className="p-3.5 rounded-xl bg-[#f6f9fc] border border-[#e3e8ee] space-y-1.5 my-4">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#64748d]">Organization</span>
+                  <span className="font-semibold text-[#0d253d]">{tenantToDelete.name}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#64748d]">Billing Email</span>
+                  <span className="text-[#273951]">{tenantToDelete.email || 'N/A'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#64748d]">Subscription Plan</span>
+                  <span className="font-medium text-[#0d253d]">{tenantToDelete.plan || 'Free'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#64748d]">Tenant ID</span>
+                  <span className="font-mono text-[11px] text-[#64748d]">{tenantToDelete.id}</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5 p-3 rounded-lg bg-[#ea2261]/5 border border-[#ea2261]/20 text-[12px] text-[#ea2261] mb-5">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>All active API keys will be immediately revoked, and unbilled usage telemetry will be permanently wiped.</span>
+              </div>
+
+              <div className="flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => {
+                    setIsDeleteOpen(false);
+                    setTenantToDelete(null);
+                  }}
+                  className="btn-secondary-pill text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={handleConfirmDelete}
+                  className="px-4 py-2 rounded-full font-medium text-xs bg-[#ea2261] hover:bg-[#d41b53] text-white shadow-sm transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{deleting ? 'Deleting...' : 'Delete Tenant'}</span>
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

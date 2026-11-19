@@ -1,5 +1,6 @@
 const meterService = require('../services/meterService');
 const invoiceService = require('../services/invoiceService');
+const aiService = require('../services/aiService');
 const crypto = require('crypto');
 const uuidv4 = () => (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'));
 const pool = require('../config/database');
@@ -12,7 +13,7 @@ class MeterController {
   async recordUsage(req, res) {
     try {
       // Inferred securely from API key (or admin request)
-      const tenant_id = req.tenantId || (req.isAdmin ? req.body.tenant_id : null);
+      const tenant_id = req.tenantId || ((req.isPlatformAdmin || req.isAdmin) ? req.body.tenant_id : null);
       const { usage_type, quantity, idempotency_key, metadata } = req.body;
       
       if (!tenant_id) {
@@ -103,7 +104,7 @@ class MeterController {
       }
 
       // Enforce tenant scoping: non-admin tenants can only view their own usage
-      if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+      if (!(req.isPlatformAdmin || req.isAdmin) && req.tenantId && req.tenantId !== targetTenantId) {
         return res.status(403).json({
           error: 'Forbidden',
           message: 'Access denied: You can only access data for your own tenant'
@@ -129,13 +130,13 @@ class MeterController {
   }
   
   /**
-   * Dummy billable endpoint
+   * Real AI model generation & billable token accounting endpoint
    * POST /api/generate
    */
   async generate(req, res) {
     try {
       const tenant_id = req.tenantId; // Inferred from API key
-      const { prompt, model = 'gpt-4' } = req.body;
+      const { prompt, model } = req.body;
       
       if (!prompt) {
         return res.status(400).json({
@@ -143,21 +144,26 @@ class MeterController {
         });
       }
       
-      // Generate deterministic response and calculate actual token counts
-      const generated_text = `Processed completion for: "${prompt.trim()}". Engine completed generation under model ${model} with temperature 0.7.`;
-      const inputTokens = Math.max(1, Math.ceil(prompt.trim().length / 4));
-      const outputTokens = Math.max(1, Math.ceil(generated_text.length / 4));
-      const totalTokens = inputTokens + outputTokens;
+      // Execute real AI model generation or BPE-aligned token engine
+      const completion = await aiService.generateCompletion(prompt, { model });
+      const generated_text = completion.text;
+      const tokens = completion.tokens;
+      const totalTokens = tokens.total_tokens || (tokens.input_tokens + tokens.output_tokens);
       
       const idempotency_key = uuidv4();
       
       const metadata = {
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
+        input_tokens: tokens.input_tokens,
+        cached_input_tokens: tokens.cached_input_tokens || 0,
+        output_tokens: tokens.output_tokens,
+        reasoning_tokens: tokens.reasoning_tokens || 0,
+        model: completion.model,
+        provider: completion.provider,
+        latency_ms: completion.latency_ms,
         prompt_preview: prompt.substring(0, 50)
       };
       
-      // Call meter service
+      // Call meter service with full token breakdown
       const result = await meterService.recordUsage(
         tenant_id,
         'ai_tokens',
@@ -176,7 +182,10 @@ class MeterController {
       // Return generated text along with real metering calculation
       res.status(200).json({
         message: 'Generation successful',
+        provider: completion.provider,
+        model: completion.model,
         generated_text,
+        latency_ms: completion.latency_ms,
         billing_info: {
           usage_recorded: result.data,
           tokens: metadata
@@ -206,7 +215,7 @@ class MeterController {
         });
       }
 
-      if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+      if (!(req.isPlatformAdmin || req.isAdmin) && req.tenantId && req.tenantId !== targetTenantId) {
         return res.status(403).json({
           error: 'Forbidden',
           message: 'Access denied: You can only generate invoices for your own tenant'
@@ -242,7 +251,7 @@ class MeterController {
       }
 
       // Enforce tenant scoping: non-admin tenants can only view their own invoices
-      if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+      if (!(req.isPlatformAdmin || req.isAdmin) && req.tenantId && req.tenantId !== targetTenantId) {
         return res.status(403).json({
           error: 'Forbidden',
           message: 'Access denied: You can only access data for your own tenant'
@@ -267,7 +276,7 @@ class MeterController {
   async getInvoiceDetail(req, res) {
     try {
       const { id } = req.params;
-      const tenantScope = req.isAdmin ? null : req.tenantId;
+      const tenantScope = (req.isPlatformAdmin || req.isAdmin) ? null : req.tenantId;
       const invoice = await invoiceService.getInvoiceById(id, tenantScope);
 
       if (!invoice) {

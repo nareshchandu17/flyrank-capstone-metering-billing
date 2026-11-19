@@ -1,28 +1,26 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  getInvoices, 
-  getInvoiceDetail, 
-  generateInvoice, 
-  getTenants, 
-  reconcileSubscriptions 
+import {
+  getInvoices,
+  getInvoiceDetail,
+  generateInvoice,
+  getTenants,
+  reconcileSubscriptions
 } from '../utils/api';
-import { 
-  Receipt, 
-  Search, 
-  RefreshCw, 
-  CheckCircle, 
-  Clock, 
-  XCircle, 
-  Plus, 
-  X, 
-  ExternalLink, 
-  Calendar, 
+import {
+  Receipt,
+  Search,
+  RefreshCw,
+  CheckCircle,
+  Clock,
+  XCircle,
+  Plus,
+  X,
+  ExternalLink,
+  Calendar,
   RotateCw,
   Eye,
-  CreditCard,
-  Layers,
-  ArrowUpRight
+  CreditCard
 } from 'lucide-react';
 
 const FramerHistory = () => {
@@ -31,7 +29,7 @@ const FramerHistory = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reconciling, setReconciling] = useState(false);
-  
+
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -148,7 +146,7 @@ const FramerHistory = () => {
 
   // Filter invoices
   const filteredInvoices = invoices.filter(inv => {
-    const matchesSearch = 
+    const matchesSearch =
       (inv.tenant_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (inv.billing_period || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (inv.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -174,13 +172,12 @@ const FramerHistory = () => {
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl border shadow-stripi-2 flex items-center gap-3 backdrop-blur-xl ${
-              toast.type === 'error' 
-                ? 'bg-white border-[#ea2261]/30 text-[#ea2261]' 
-                : toast.type === 'info'
-                ? 'bg-white border-[#533afd]/30 text-[#533afd]'
+            className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-xl border shadow-stripi-2 flex items-center gap-3 backdrop-blur-xl ${toast.type === 'error'
+              ? 'bg-white border-[#ea2261]/30 text-[#ea2261]'
+              : toast.type === 'info'
+                ? 'bg-white border-[#A3E635] text-[#3F6212]'
                 : 'bg-white border-emerald-500/30 text-emerald-800'
-            }`}
+              }`}
           >
             {toast.type === 'error' ? (
               <XCircle className="w-4 h-4 text-[#ea2261]" />
@@ -192,7 +189,7 @@ const FramerHistory = () => {
         )}
       </AnimatePresence>
 
-      {/* Header with single-indigo CTA */}
+      {/* Header with single CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
@@ -223,7 +220,7 @@ const FramerHistory = () => {
             className="btn-secondary-pill"
             title="Synchronize subscription state with Stripe"
           >
-            <RotateCw className={`w-3.5 h-3.5 mr-1.5 text-[#533afd] ${reconciling ? 'animate-spin' : ''}`} />
+            <RotateCw className={`w-3.5 h-3.5 mr-1.5 text-[#4D7C0F] ${reconciling ? 'animate-spin' : ''}`} />
             <span>{reconciling ? 'Syncing...' : 'Reconcile Subscriptions'}</span>
           </button>
 
@@ -242,7 +239,7 @@ const FramerHistory = () => {
         <div className="card-stripi p-6 bg-white">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium uppercase tracking-wider text-[#64748d]">Total Invoices</span>
-            <div className="w-8 h-8 rounded-pill bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center text-[#533afd]">
+            <div className="w-8 h-8 rounded-pill bg-[#D4FF28]/20 border border-[#C4EF1E]/40 flex items-center justify-center text-[#3F6212]">
               <Receipt className="w-4 h-4" />
             </div>
           </div>
@@ -354,300 +351,346 @@ const FramerHistory = () => {
             </thead>
             <tbody className="divide-y divide-[#e3e8ee]">
               {loading ? (
-                <tr>
-                  <td colSpan="6" className="py-12 text-center text-[#64748d]">
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="w-4 h-4 border-2 border-[#533afd] border-t-transparent rounded-full animate-spin" />
-                      <span className="text-sm">Loading billing records...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredInvoices.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="py-12 text-center text-[#64748d]">
-                    <Receipt className="w-8 h-8 text-[#64748d]/40 mx-auto mb-2" />
-                    <p className="text-sm font-medium text-[#0d253d]">No invoices found</p>
-                    <p className="text-xs text-[#64748d] mt-1">Click "Generate Period Invoice" to calculate the current billing cycle.</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredInvoices.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-[#f6f9fc] transition-colors">
+                [...Array(4)].map((_, idx) => (
+                  <tr key={`inv-skel-${idx}`} className="animate-pulse">
                     <td className="py-3.5 px-5">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-3.5 h-3.5 text-[#533afd]" />
-                        <span className="font-body-tabular text-sm font-medium text-[#0d253d] tnum">{inv.billing_period}</span>
+                      <div className="h-4 bg-[#e3e8ee] rounded w-20" />
+                    </td>
+                    <td className="py-3.5 px-5">
+                      <div className="space-y-1">
+                        <div className="h-3.5 bg-[#e3e8ee] rounded w-28" />
+                        <div className="h-2.5 bg-[#e3e8ee] rounded w-36" />
                       </div>
                     </td>
-
-                    <td className="py-3.5 px-5">
-                      <div className="text-sm font-medium text-[#0d253d]">
-                        {inv.tenant_name || (tenants.find(t => t.id === inv.tenant_id)?.name || 'Unknown')}
-                      </div>
-                      <div className="text-[10px] text-[#64748d] font-mono tnum">ID: {inv.id.substring(0, 8)}...</div>
-                    </td>
-
-                    <td className="py-3.5 px-5 text-right font-body-tabular text-sm font-medium text-[#0d253d] tnum">
-                      ${(inv.amount_cents / 100).toFixed(2)}
-                    </td>
-
-                    <td className="py-3.5 px-5">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-pill text-[11px] font-medium border ${
-                        inv.status === 'paid'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : inv.status === 'payment_failed'
-                          ? 'bg-red-50 text-[#ea2261] border-red-200'
-                          : 'bg-[#f5e9d4] text-[#9b6829] border-[#9b6829]/20'
-                      }`}>
-                        {inv.status === 'paid' ? (
-                          <CheckCircle className="w-3 h-3 text-emerald-600" />
-                        ) : inv.status === 'payment_failed' ? (
-                          <XCircle className="w-3 h-3 text-[#ea2261]" />
-                        ) : (
-                          <Clock className="w-3 h-3 text-[#9b6829]" />
-                        )}
-                        <span className="capitalize">{inv.status}</span>
-                      </span>
-                    </td>
-
-                    <td className="py-3.5 px-5">
-                      {inv.stripe_invoice_id ? (
-                        <div className="text-xs text-[#533afd] font-mono tnum">
-                          {inv.stripe_invoice_id.substring(0, 16)}...
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-[#64748d]">Local Ledger Only</span>
-                      )}
-                    </td>
-
                     <td className="py-3.5 px-5 text-right">
-                      <button
-                        onClick={() => handleInspectInvoice(inv)}
-                        className="btn-secondary-pill text-xs py-1 px-3"
-                      >
-                        <Eye className="w-3 h-3 mr-1 text-[#533afd]" />
-                        <span>Inspect Line Items</span>
-                      </button>
+                      <div className="h-4 bg-[#e3e8ee] rounded w-16 ml-auto" />
+                    </td>
+                    <td className="py-3.5 px-5">
+                      <div className="h-5 bg-[#e3e8ee] rounded-full w-14" />
+                    </td>
+                    <td className="py-3.5 px-5">
+                      <div className="h-3 bg-[#e3e8ee] rounded w-32" />
+                    </td>
+                    <td className="py-3.5 px-5 text-right">
+                      <div className="h-6 bg-[#e3e8ee] rounded w-16 ml-auto" />
                     </td>
                   </tr>
                 ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              ) : filteredInvoices.length === 0 ? (
+                <tr>
+                      <td colSpan="6" className="py-16 text-center">
+                        <div className="max-w-sm mx-auto text-center">
+                          <div className="w-12 h-12 rounded-2xl bg-[#f6f9fc] border border-[#e3e8ee] text-slate-400 flex items-center justify-center mx-auto mb-3 shadow-sm">
+                            <Receipt className="w-6 h-6 text-[#4D7C0F]" />
+                          </div>
+                          <h3 className="text-sm font-semibold text-[#0d253d] mb-1">
+                            {invoices.length === 0 ? 'No Invoices Generated Yet' : 'No Invoices Match Current Search'}
+                          </h3>
+                          <p className="text-xs text-[#64748d] mb-4 leading-relaxed">
+                            {invoices.length === 0
+                              ? 'Period invoices aggregate all accumulated micro-metered usage events into a single Stripe payment statement.'
+                              : 'Try adjusting your status filter or clearing your search term.'}
+                          </p>
+                          {invoices.length === 0 ? (
+                            <button
+                              onClick={() => setIsGenerateModalOpen(true)}
+                              className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              Generate Period Invoice
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setSearchTerm('');
+                                setStatusFilter('all');
+                                setSelectedTenantFilter('all');
+                              }}
+                              className="btn-secondary-pill text-xs py-1.5 px-3"
+                            >
+                              Reset Filters
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    ) : (
+                  filteredInvoices.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-[#f6f9fc] transition-colors">
+                      <td className="py-3.5 px-5">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-3.5 h-3.5 text-[#4D7C0F]" />
+                          <span className="font-body-tabular text-sm font-medium text-[#0d253d] tnum">{inv.billing_period}</span>
+                        </div>
+                      </td>
 
-      {/* INSPECT INVOICE & LINE ITEMS MODAL */}
-      <AnimatePresence>
-        {isDetailOpen && selectedInvoice && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d253d]/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              className="w-full max-w-2xl bg-white border border-[#e3e8ee] rounded-xl shadow-stripi-2 p-6 overflow-hidden max-h-[90vh] flex flex-col"
-            >
-              <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-5">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="pill-tag-soft">Itemized Statement</span>
-                    <span className="text-xs text-[#64748d] tnum">Period: {selectedInvoice.billing_period}</span>
-                  </div>
-                  <h2 className="font-display-md text-[#0d253d] mt-1">
-                    Invoice #{selectedInvoice.id?.substring(0, 8)}
-                  </h2>
-                </div>
-                <button
-                  onClick={() => setIsDetailOpen(false)}
-                  className="p-1.5 rounded-pill text-[#64748d] hover:text-[#0d253d] hover:bg-[#f6f9fc]"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+                      <td className="py-3.5 px-5">
+                        <div className="text-sm font-medium text-[#0d253d]">
+                          {inv.tenant_name || (tenants.find(t => t.id === inv.tenant_id)?.name || 'Unknown')}
+                        </div>
+                        <div className="text-[10px] text-[#64748d] font-mono tnum">ID: {inv.id.substring(0, 8)}...</div>
+                      </td>
 
-              <div className="space-y-5 overflow-y-auto flex-1 pr-1">
-                {/* Meta Summary Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
-                  <div>
-                    <div className="text-[11px] text-[#64748d] uppercase font-semibold">Total Amount</div>
-                    <div className="text-lg font-light text-[#0d253d] tnum">
-                      ${(selectedInvoice.amount_cents / 100).toFixed(2)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-[#64748d] uppercase font-semibold">Status</div>
-                    <div className="text-sm font-medium text-[#0d253d] capitalize mt-0.5">{selectedInvoice.status}</div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-[#64748d] uppercase font-semibold">Paid Timestamp</div>
-                    <div className="text-xs text-[#273951] tnum mt-0.5">
-                      {selectedInvoice.paid_at ? new Date(selectedInvoice.paid_at).toLocaleDateString() : 'Unpaid'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-[#64748d] uppercase font-semibold">Stripe ID</div>
-                    <div className="text-xs font-mono text-[#533afd] truncate tnum mt-0.5">
-                      {selectedInvoice.stripe_invoice_id || 'None'}
-                    </div>
-                  </div>
-                </div>
+                      <td className="py-3.5 px-5 text-right font-body-tabular text-sm font-medium text-[#0d253d] tnum">
+                        ${(inv.amount_cents / 100).toFixed(2)}
+                      </td>
 
-                {/* Line Items Table */}
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748d] mb-2.5">Billable Line Items</h3>
-                  <div className="rounded-lg border border-[#e3e8ee] overflow-hidden">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-[#64748d]">
-                          <th className="py-2.5 px-4 font-semibold">Description</th>
-                          <th className="py-2.5 px-4 font-semibold text-right">Quantity</th>
-                          <th className="py-2.5 px-4 font-semibold text-right">Amount ($)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#e3e8ee]">
-                        {loadingDetail ? (
-                          <tr>
-                            <td colSpan="3" className="py-6 text-center text-[#64748d]">Loading line items...</td>
-                          </tr>
-                        ) : selectedInvoice.line_items && selectedInvoice.line_items.length > 0 ? (
-                          selectedInvoice.line_items.map((item, idx) => (
-                            <tr key={item.id || idx} className="hover:bg-[#f6f9fc]/50">
-                              <td className="py-3 px-4 text-[#0d253d] font-medium">{item.description}</td>
-                              <td className="py-3 px-4 text-right font-body-tabular text-[#273951] tnum">
-                                {Number(item.quantity).toLocaleString()}
-                              </td>
-                              <td className="py-3 px-4 text-right font-body-tabular font-medium text-[#0d253d] tnum">
-                                ${(item.amount_cents / 100).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))
+                      <td className="py-3.5 px-5">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-pill text-[11px] font-medium border ${inv.status === 'paid'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : inv.status === 'payment_failed'
+                            ? 'bg-red-50 text-[#ea2261] border-red-200'
+                            : 'bg-[#f5e9d4] text-[#9b6829] border-[#9b6829]/20'
+                          }`}>
+                          {inv.status === 'paid' ? (
+                            <CheckCircle className="w-3 h-3 text-emerald-600" />
+                          ) : inv.status === 'payment_failed' ? (
+                            <XCircle className="w-3 h-3 text-[#ea2261]" />
+                          ) : (
+                            <Clock className="w-3 h-3 text-[#9b6829]" />
+                          )}
+                          <span className="capitalize">{inv.status}</span>
+                        </span>
+                      </td>
+
+                      <td className="py-3.5 px-5">
+                        {inv.stripe_invoice_id ? (
+                          <div className="text-xs text-[#3F6212] font-mono tnum">
+                            {inv.stripe_invoice_id.substring(0, 16)}...
+                          </div>
                         ) : (
-                          <tr>
-                            <td colSpan="3" className="py-6 text-center text-[#64748d]">No billable items for this period.</td>
-                          </tr>
+                          <span className="text-[11px] text-[#64748d]">Local Ledger Only</span>
                         )}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t border-[#e3e8ee] bg-[#f6f9fc] font-medium text-xs">
-                          <td className="py-3 px-4 text-[#0d253d]">Total Settlement</td>
-                          <td className="py-3 px-4"></td>
-                          <td className="py-3 px-4 text-right font-body-tabular text-sm font-semibold text-[#0d253d] tnum">
-                            ${(selectedInvoice.amount_cents / 100).toFixed(2)}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                </div>
+                      </td>
 
-                {/* Stripe Hosted Link */}
-                {selectedInvoice.hosted_invoice_url && (
-                  <div className="p-4 rounded-lg bg-[#533afd]/5 border border-[#533afd]/20 flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-semibold text-[#0d253d]">Stripe Test-Mode Hosted Invoice</div>
-                      <div className="text-[11px] text-[#64748d]">Open customer payment checkout page in Stripe Sandbox</div>
-                    </div>
-                    <a
-                      href={selectedInvoice.hosted_invoice_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-primary-pill text-xs py-1.5 px-3 flex items-center gap-1"
-                    >
-                      <span>Open Checkout</span>
-                      <ExternalLink className="w-3.5 h-3.5 ml-1" />
-                    </a>
-                  </div>
+                      <td className="py-3.5 px-5 text-right">
+                        <button
+                          onClick={() => handleInspectInvoice(inv)}
+                          className="btn-secondary-pill text-xs py-1 px-3"
+                        >
+                          <Eye className="w-3 h-3 mr-1 text-[#4D7C0F]" />
+                          <span>Inspect Line Items</span>
+                        </button>
+                      </td>
+                    </tr>
+                    ))
                 )}
-              </div>
-
-              <div className="pt-4 border-t border-[#e3e8ee] flex justify-end">
-                <button
-                  onClick={() => setIsDetailOpen(false)}
-                  className="btn-secondary-pill text-xs py-1.5 px-4"
-                >
-                  Close
-                </button>
-              </div>
-            </motion.div>
+                  </tbody>
+                </table>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
 
-      {/* GENERATE INVOICE MODAL */}
-      <AnimatePresence>
-        {isGenerateOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d253d]/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              className="w-full max-w-md bg-white border border-[#e3e8ee] rounded-xl shadow-stripi-2 p-6"
-            >
-              <div className="flex items-center justify-between mb-5 pb-3 border-b border-[#e3e8ee]">
-                <div>
-                  <h2 className="font-heading-lg text-[#0d253d]">Generate Period Invoice</h2>
-                  <p className="text-xs text-[#64748d] mt-0.5">Calculates usage tiers and creates idempotent ledger record</p>
-                </div>
-                <button
-                  onClick={() => setIsGenerateOpen(false)}
-                  className="p-1 rounded-pill text-[#64748d] hover:text-[#0d253d]"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleGenerateSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-[#273951] mb-1">Target Tenant</label>
-                  <select
-                    value={genTenantId}
-                    onChange={(e) => setGenTenantId(e.target.value)}
-                    required
-                    className="text-input-stripi w-full"
-                  >
-                    {tenants.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.plan} Plan)</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-[#273951] mb-1">Billing Period (YYYY-MM)</label>
-                  <input
-                    type="text"
-                    required
-                    pattern="^\d{4}-\d{2}$"
-                    placeholder="2026-10"
-                    value={genPeriod}
-                    onChange={(e) => setGenPeriod(e.target.value)}
-                    className="text-input-stripi w-full font-body-tabular tnum"
-                  />
-                  <p className="text-[11px] text-[#64748d] mt-1">Single calendar month in YYYY-MM format.</p>
-                </div>
-
-                <div className="pt-4 flex items-center justify-end gap-2.5">
+        {/* INSPECT INVOICE & LINE ITEMS MODAL */}
+        <AnimatePresence>
+          {isDetailOpen && selectedInvoice && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d253d]/50 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                className="w-full max-w-2xl bg-white border border-[#e3e8ee] rounded-xl shadow-stripi-2 p-6 overflow-hidden max-h-[90vh] flex flex-col"
+              >
+                <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="pill-tag-soft">Itemized Statement</span>
+                      <span className="text-xs text-[#64748d] tnum">Period: {selectedInvoice.billing_period}</span>
+                    </div>
+                    <h2 className="font-display-md text-[#0d253d] mt-1">
+                      Invoice #{selectedInvoice.id?.substring(0, 8)}
+                    </h2>
+                  </div>
                   <button
-                    type="button"
+                    onClick={() => setIsDetailOpen(false)}
+                    className="p-1.5 rounded-pill text-[#64748d] hover:text-[#0d253d] hover:bg-[#f6f9fc]"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-5 overflow-y-auto flex-1 pr-1">
+                  {/* Meta Summary Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                    <div>
+                      <div className="text-[11px] text-[#64748d] uppercase font-semibold">Total Amount</div>
+                      <div className="text-lg font-light text-[#0d253d] tnum">
+                        ${(selectedInvoice.amount_cents / 100).toFixed(2)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-[#64748d] uppercase font-semibold">Status</div>
+                      <div className="text-sm font-medium text-[#0d253d] capitalize mt-0.5">{selectedInvoice.status}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-[#64748d] uppercase font-semibold">Paid Timestamp</div>
+                      <div className="text-xs text-[#273951] tnum mt-0.5">
+                        {selectedInvoice.paid_at ? new Date(selectedInvoice.paid_at).toLocaleDateString() : 'Unpaid'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-[#64748d] uppercase font-semibold">Stripe ID</div>
+                      <div className="text-xs font-mono text-[#3F6212] truncate tnum mt-0.5">
+                        {selectedInvoice.stripe_invoice_id || 'None'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Line Items Table */}
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748d] mb-2.5">Billable Line Items</h3>
+                    <div className="rounded-lg border border-[#e3e8ee] overflow-hidden">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-[#64748d]">
+                            <th className="py-2.5 px-4 font-semibold">Description</th>
+                            <th className="py-2.5 px-4 font-semibold text-right">Quantity</th>
+                            <th className="py-2.5 px-4 font-semibold text-right">Amount ($)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#e3e8ee]">
+                          {loadingDetail ? (
+                            <tr>
+                              <td colSpan="3" className="py-6 text-center text-[#64748d]">Loading line items...</td>
+                            </tr>
+                          ) : selectedInvoice.line_items && selectedInvoice.line_items.length > 0 ? (
+                            selectedInvoice.line_items.map((item, idx) => (
+                              <tr key={item.id || idx} className="hover:bg-[#f6f9fc]/50">
+                                <td className="py-3 px-4 text-[#0d253d] font-medium">{item.description}</td>
+                                <td className="py-3 px-4 text-right font-body-tabular text-[#273951] tnum">
+                                  {Number(item.quantity).toLocaleString()}
+                                </td>
+                                <td className="py-3 px-4 text-right font-body-tabular font-medium text-[#0d253d] tnum">
+                                  ${(item.amount_cents / 100).toFixed(2)}
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan="3" className="py-6 text-center text-[#64748d]">No billable items for this period.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-[#e3e8ee] bg-[#f6f9fc] font-medium text-xs">
+                            <td className="py-3 px-4 text-[#0d253d]">Total Settlement</td>
+                            <td className="py-3 px-4"></td>
+                            <td className="py-3 px-4 text-right font-body-tabular text-sm font-semibold text-[#0d253d] tnum">
+                              ${(selectedInvoice.amount_cents / 100).toFixed(2)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Stripe Hosted Link */}
+                  {selectedInvoice.hosted_invoice_url && (
+                    <div className="p-4 rounded-lg bg-[#D4FF28]/10 border border-[#C4EF1E]/40 flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-semibold text-[#0d253d]">Stripe Test-Mode Hosted Invoice</div>
+                        <div className="text-[11px] text-[#64748d]">Open customer payment checkout page in Stripe Sandbox</div>
+                      </div>
+                      <a
+                        href={selectedInvoice.hosted_invoice_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-primary-pill text-xs py-1.5 px-3 flex items-center gap-1"
+                      >
+                        <span>Open Checkout</span>
+                        <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-[#e3e8ee] flex justify-end">
+                  <button
+                    onClick={() => setIsDetailOpen(false)}
+                    className="btn-secondary-pill text-xs py-1.5 px-4"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* GENERATE INVOICE MODAL */}
+        <AnimatePresence>
+          {isGenerateOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d253d]/50 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                className="w-full max-w-md bg-white border border-[#e3e8ee] rounded-xl shadow-stripi-2 p-6"
+              >
+                <div className="flex items-center justify-between mb-5 pb-3 border-b border-[#e3e8ee]">
+                  <div>
+                    <h2 className="font-heading-lg text-[#0d253d]">Generate Period Invoice</h2>
+                    <p className="text-xs text-[#64748d] mt-0.5">Calculates usage tiers and creates idempotent ledger record</p>
+                  </div>
+                  <button
                     onClick={() => setIsGenerateOpen(false)}
-                    className="btn-secondary-pill text-xs"
+                    className="p-1 rounded-pill text-[#64748d] hover:text-[#0d253d]"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={generating}
-                    className="btn-primary-pill text-xs"
-                  >
-                    {generating ? 'Calculating...' : 'Run Invoicing'}
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
+
+                <form onSubmit={handleGenerateSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-[#273951] mb-1">Target Tenant</label>
+                    <select
+                      value={genTenantId}
+                      onChange={(e) => setGenTenantId(e.target.value)}
+                      required
+                      className="text-input-stripi w-full"
+                    >
+                      {tenants.map(t => (
+                        <option key={t.id} value={t.id}>{t.name} ({t.plan} Plan)</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-[#273951] mb-1">Billing Period (YYYY-MM)</label>
+                    <input
+                      type="text"
+                      required
+                      pattern="^\d{4}-\d{2}$"
+                      placeholder="2026-10"
+                      value={genPeriod}
+                      onChange={(e) => setGenPeriod(e.target.value)}
+                      className="text-input-stripi w-full font-body-tabular tnum"
+                    />
+                    <p className="text-[11px] text-[#64748d] mt-1">Single calendar month in YYYY-MM format.</p>
+                  </div>
+
+                  <div className="pt-4 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsGenerateOpen(false)}
+                      className="btn-secondary-pill text-xs"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={generating}
+                      className="btn-primary-pill text-xs"
+                    >
+                      {generating ? 'Calculating...' : 'Run Invoicing'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+      );
 };
 
-export default FramerHistory;
+      export default FramerHistory;

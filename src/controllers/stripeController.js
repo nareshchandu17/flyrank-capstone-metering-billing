@@ -1,4 +1,5 @@
 const stripeService = require('../services/stripeService');
+const invoiceService = require('../services/invoiceService');
 
 class StripeController {
   /**
@@ -7,17 +8,18 @@ class StripeController {
    */
   async createCheckoutSession(req, res) {
     try {
-      const { tenant_id, plan_name } = req.body;
+      const targetTenantId = req.body.tenant_id || req.tenantId;
+      const { plan_name } = req.body;
       
       // Validate required fields
-      if (!tenant_id || !plan_name) {
+      if (!targetTenantId || !plan_name) {
         return res.status(400).json({
           error: 'Missing required fields: tenant_id, plan_name'
         });
       }
 
-      // Enforce tenant scoping if authenticated as tenant
-      if (!req.isAdmin && req.tenantId && req.tenantId !== tenant_id) {
+      // Enforce server-side tenant scoping
+      if (!req.isPlatformAdmin && req.tenantId && req.tenantId !== targetTenantId) {
         return res.status(403).json({
           error: 'Forbidden',
           message: 'Access denied: You can only manage Stripe billing for your own tenant'
@@ -31,7 +33,7 @@ class StripeController {
         });
       }
       
-      const session = await stripeService.createCheckoutSession(tenant_id, plan_name);
+      const session = await stripeService.createCheckoutSession(targetTenantId, plan_name);
       
       res.status(200).json({
         checkout_url: session.url,
@@ -52,30 +54,30 @@ class StripeController {
    */
   async upgradeSubscription(req, res) {
     try {
-      const { tenant_id, new_plan_name } = req.body;
+      const targetTenantId = req.body.tenant_id || req.tenantId;
+      const newPlanName = req.body.new_plan_name || req.body.plan_name;
       
-      if (!tenant_id || !new_plan_name) {
+      if (!targetTenantId || !newPlanName) {
         return res.status(400).json({
           error: 'Missing required fields: tenant_id, new_plan_name'
         });
       }
 
-      // Enforce tenant scoping if authenticated as tenant
-      if (!req.isAdmin && req.tenantId && req.tenantId !== tenant_id) {
+      // Enforce server-side tenant scoping
+      if (!req.isPlatformAdmin && req.tenantId && req.tenantId !== targetTenantId) {
         return res.status(403).json({
           error: 'Forbidden',
           message: 'Access denied: You can only manage Stripe billing for your own tenant'
         });
       }
       
-      if (!['Free', 'Pro'].includes(new_plan_name)) {
+      if (!['Free', 'Pro'].includes(newPlanName)) {
         return res.status(400).json({
           error: 'Invalid plan_name. Must be "Free" or "Pro"'
         });
       }
       
-      const result = await stripeService.upgradeSubscription(tenant_id, new_plan_name);
-      
+      const result = await stripeService.upgradeSubscription(targetTenantId, newPlanName);
       res.status(200).json(result);
       
     } catch (error) {
@@ -83,6 +85,77 @@ class StripeController {
       if (error.message.includes('No active subscription')) {
         return res.status(400).json({ error: error.message });
       }
+      res.status(error.statusCode || 500).json({
+        error: error.message || 'Internal server error'
+      });
+    }
+  }
+
+  /**
+   * Cancel subscription
+   * POST /api/stripe/cancel
+   */
+  async cancelSubscription(req, res) {
+    try {
+      const targetTenantId = req.body.tenant_id || req.tenantId;
+      const { cancel_at_period_end = false } = req.body;
+
+      if (!targetTenantId) {
+        return res.status(400).json({
+          error: 'Missing required field: tenant_id'
+        });
+      }
+
+      // Enforce server-side tenant scoping
+      if (!req.isPlatformAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only cancel subscriptions for your own tenant'
+        });
+      }
+
+      const result = await stripeService.cancelSubscription(targetTenantId, { cancelAtPeriodEnd: cancel_at_period_end });
+      res.status(200).json(result);
+    } catch (error) {
+      console.error('Error canceling subscription:', error.message);
+      res.status(error.statusCode || 500).json({
+        error: error.message || 'Internal server error'
+      });
+    }
+  }
+
+  /**
+   * Sync a local invoice with Stripe (recoverable synchronization)
+   * POST /api/stripe/invoices/:invoice_id/sync
+   */
+  async syncInvoiceToStripe(req, res) {
+    try {
+      const invoiceId = req.params.invoice_id || req.params.id;
+      if (!invoiceId) {
+        return res.status(400).json({ error: 'Invoice ID is required' });
+      }
+
+      const invoice = await invoiceService.getInvoiceById(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      // Enforce tenant scoping
+      if (!req.isPlatformAdmin && req.tenantId && req.tenantId !== invoice.tenant_id) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: You can only sync invoices for your own tenant'
+        });
+      }
+
+      const syncedInvoice = await invoiceService.syncInvoiceToStripe(invoiceId);
+      res.status(200).json({
+        success: true,
+        message: 'Invoice synchronized with Stripe successfully',
+        invoice: syncedInvoice
+      });
+    } catch (error) {
+      console.error('Error syncing invoice with Stripe:', error.message);
       res.status(error.statusCode || 500).json({
         error: error.message || 'Internal server error'
       });
@@ -137,7 +210,7 @@ class StripeController {
       const targetTenantId = req.params.tenant_id || (req.body && req.body.tenant_id);
 
       if (targetTenantId) {
-        if (!req.isAdmin && req.tenantId && req.tenantId !== targetTenantId) {
+        if (!req.isPlatformAdmin && req.tenantId && req.tenantId !== targetTenantId) {
           return res.status(403).json({
             error: 'Forbidden',
             message: 'Access denied: You can only reconcile your own tenant'
@@ -147,11 +220,11 @@ class StripeController {
         return res.status(200).json(result);
       }
 
-      // Reconcile all tenants (admin only)
-      if (!req.isAdmin) {
+      // Reconcile all tenants (Platform Admin only)
+      if (!req.isPlatformAdmin) {
         return res.status(403).json({
           error: 'Forbidden',
-          message: 'Admin privileges required to reconcile all subscriptions'
+          message: 'Platform Admin privileges required to reconcile all subscriptions'
         });
       }
 
@@ -162,6 +235,21 @@ class StripeController {
       res.status(500).json({
         error: error.message || 'Internal server error'
       });
+    }
+  }
+
+  /**
+   * Get webhook events lifecycle log (Platform Admin only)
+   * GET /api/stripe/webhooks/events
+   */
+  async getWebhookEvents(req, res) {
+    try {
+      const { status, limit } = req.query;
+      const events = await stripeService.getWebhookEvents({ status, limit });
+      res.status(200).json(events);
+    } catch (error) {
+      console.error('Error fetching webhook events:', error.message);
+      res.status(500).json({ error: 'Failed to fetch webhook events' });
     }
   }
 }

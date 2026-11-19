@@ -1,15 +1,18 @@
 const db = require('../config/database');
+const meterService = require('../services/meterService');
 
-// Get all tenants
+// Get all tenants with real usage, real calculated revenue, and active status
 const getAllTenants = async (req, res) => {
   try {
-    const result = await db.query(`
+    let query = `
       SELECT 
         t.id,
         t.name,
         t.email,
+        t.status,
         t.stripe_customer_id,
         t.plan_id,
+        t.created_at,
         p.name as plan_name,
         p.api_calls_limit,
         p.ai_tokens_limit,
@@ -18,24 +21,54 @@ const getAllTenants = async (req, res) => {
       FROM tenants t
       LEFT JOIN plans p ON t.plan_id = p.id
       LEFT JOIN usage_events ue ON t.id = ue.tenant_id
-      GROUP BY t.id, t.name, t.email, t.stripe_customer_id, t.plan_id, p.name, p.api_calls_limit, p.ai_tokens_limit
+    `;
+    const params = [];
+
+    if (!req.isPlatformAdmin && req.user?.id) {
+      query += ` INNER JOIN tenant_memberships tm ON tm.tenant_id = t.id AND tm.user_id = $1 AND tm.status = 'active'`;
+      params.push(req.user.id);
+    }
+
+    query += `
+      GROUP BY t.id, t.name, t.email, t.status, t.stripe_customer_id, t.plan_id, t.created_at, p.name, p.api_calls_limit, p.ai_tokens_limit
       ORDER BY t.created_at DESC
-    `);
+    `;
+
+    const result = await db.query(query, params);
     
-    // Map plan names to tier names for frontend
-    const mappedData = result.rows.map(row => ({
-      ...row,
-      tier: row.plan_name,
-      status: 'active',
-      usage: row.monthly_events?.toLocaleString() || '0',
-      revenue: '$0.00',
-      growth: '+0%',
-      quota: 0,
-      apiKey: 'pk_live_••••••••••••••••',
-      created: new Date(row.created_at).toISOString().split('T')[0]
-    }));
+    // Enrich with exact real-time costs and quotas
+    const enrichedTenants = [];
+    for (const row of result.rows) {
+      let tenantCost = '$0.00';
+      let tenantTotalUsage = parseInt(row.monthly_events || 0, 10);
+      let quotaLimit = (row.api_calls_limit || 0) + (row.ai_tokens_limit || 0);
+
+      try {
+        const summary = await meterService.getUsageSummary(row.id);
+        tenantCost = `$${summary.costs?.total_dollars || '0.00'}`;
+        tenantTotalUsage = (summary.usage?.api_calls?.used || 0) + (summary.usage?.ai_tokens?.used || 0);
+      } catch (err) {
+        // Fallback to basic invoice sum if usage summary query fails
+        const invSum = await db.query(
+          'SELECT COALESCE(SUM(amount_cents), 0) as total FROM invoices WHERE tenant_id = $1',
+          [row.id]
+        );
+        tenantCost = `$${(parseInt(invSum.rows[0]?.total || 0, 10) / 100).toFixed(2)}`;
+      }
+
+      enrichedTenants.push({
+        ...row,
+        tier: row.plan_name || 'Free',
+        status: row.status || 'active',
+        usage: tenantTotalUsage.toLocaleString(),
+        revenue: tenantCost,
+        cost: tenantCost.replace('$', ''),
+        quota: quotaLimit,
+        created: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+      });
+    }
     
-    res.json({ success: true, data: mappedData });
+    res.json({ success: true, data: enrichedTenants });
   } catch (error) {
     console.error('Error fetching tenants:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch tenants' });
@@ -47,7 +80,10 @@ const getTenantById = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await db.query(
-      'SELECT * FROM tenants WHERE id = $1',
+      `SELECT t.*, p.name as plan_name, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
+       FROM tenants t
+       LEFT JOIN plans p ON t.plan_id = p.id
+       WHERE t.id = $1`,
       [id]
     );
     
@@ -65,7 +101,7 @@ const getTenantById = async (req, res) => {
 // Create new tenant
 const createTenant = async (req, res) => {
   try {
-    const { name, email, plan_id = 1 } = req.body;
+    const { name, email, plan = 'Free', plan_id } = req.body;
     
     // Validate input
     if (!name || !email) {
@@ -81,16 +117,38 @@ const createTenant = async (req, res) => {
     if (existing.rows.length > 0) {
       return res.status(400).json({ success: false, message: 'Email already exists' });
     }
+
+    // Resolve plan ID by plan name or ID
+    let resolvedPlanId = plan_id;
+    if (!resolvedPlanId) {
+      const planRes = await db.query('SELECT id FROM plans WHERE name = $1', [plan]);
+      if (planRes.rows.length === 0) {
+        return res.status(400).json({ success: false, message: `Plan "${plan}" not found` });
+      }
+      resolvedPlanId = planRes.rows[0].id;
+    }
     
     // Create tenant
     const result = await db.query(
-      `INSERT INTO tenants (name, email, plan_id, created_at, updated_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
+      `INSERT INTO tenants (name, email, plan_id, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'active', NOW(), NOW())
        RETURNING *`,
-      [name, email, plan_id]
+      [name, email, resolvedPlanId]
     );
     
-    res.status(201).json({ success: true, data: result.rows[0] });
+    const createdTenant = result.rows[0];
+
+    // If request has an authenticated user, automatically assign them as Tenant Owner
+    if (req.user?.id) {
+      await db.query(
+        `INSERT INTO tenant_memberships (user_id, tenant_id, role, status)
+         VALUES ($1, $2, 'Tenant Owner', 'active')
+         ON CONFLICT (user_id, tenant_id) DO NOTHING`,
+        [req.user.id, createdTenant.id]
+      );
+    }
+
+    res.status(201).json({ success: true, data: createdTenant });
   } catch (error) {
     console.error('Error creating tenant:', error);
     res.status(500).json({ success: false, message: 'Failed to create tenant' });
@@ -101,7 +159,7 @@ const createTenant = async (req, res) => {
 const updateTenant = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, plan_id } = req.body;
+    const { name, email, status, plan_id, plan } = req.body;
     
     // Check if tenant exists
     const existing = await db.query(
@@ -112,17 +170,26 @@ const updateTenant = async (req, res) => {
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
+
+    let resolvedPlanId = plan_id;
+    if (plan && !resolvedPlanId) {
+      const planRes = await db.query('SELECT id FROM plans WHERE name = $1', [plan]);
+      if (planRes.rows.length > 0) {
+        resolvedPlanId = planRes.rows[0].id;
+      }
+    }
     
     // Update tenant
     const result = await db.query(
       `UPDATE tenants 
        SET name = COALESCE($1, name),
            email = COALESCE($2, email),
-           plan_id = COALESCE($3, plan_id),
+           status = COALESCE($3, status),
+           plan_id = COALESCE($4, plan_id),
            updated_at = NOW()
-       WHERE id = $4
+       WHERE id = $5
        RETURNING *`,
-      [name, email, plan_id, id]
+      [name, email, status, resolvedPlanId, id]
     );
     
     res.json({ success: true, data: result.rows[0] });
@@ -157,7 +224,7 @@ const deleteTenant = async (req, res) => {
   }
 };
 
-// Get tenant usage
+// Get tenant usage with correct column names
 const getTenantUsage = async (req, res) => {
   try {
     const { id } = req.params;
@@ -166,8 +233,8 @@ const getTenantUsage = async (req, res) => {
       SELECT 
         COUNT(*) as total_events,
         COUNT(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) THEN 1 END) as monthly_events,
-        SUM(CASE WHEN event_type = 'api_call' THEN 1 ELSE 0 END) as api_calls,
-        SUM(CASE WHEN event_type = 'ai_token' THEN quantity ELSE 0 END) as ai_tokens
+        COALESCE(SUM(CASE WHEN usage_type = 'api_call' THEN quantity ELSE 0 END), 0) as api_calls,
+        COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' THEN quantity ELSE 0 END), 0) as ai_tokens
       FROM usage_events
       WHERE tenant_id = $1
       `,
@@ -187,7 +254,7 @@ const getTenantSubscription = async (req, res) => {
     const { id } = req.params;
     const result = await db.query(
       `
-      SELECT s.*, p.name as plan_name, p.api_calls_limit, p.ai_tokens_limit
+      SELECT s.*, p.name as plan_name, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
       FROM subscriptions s
       JOIN plans p ON s.plan_id = p.id
       WHERE s.tenant_id = $1

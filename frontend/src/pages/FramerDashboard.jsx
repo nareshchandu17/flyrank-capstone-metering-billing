@@ -1,22 +1,21 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { getMetrics, getRealTimeUsage, getTenants, getUsageHistory } from '../utils/api';
-import { 
-  DollarSign, 
-  Users, 
-  Activity, 
+import {
+  DollarSign,
+  Users,
+  Activity,
   Zap,
   RefreshCw,
   Receipt,
   ArrowUpRight,
   ArrowDownRight,
   ChevronRight,
-  ShieldCheck,
   CheckCircle2,
   Clock,
   AlertTriangle,
   Terminal,
-  ExternalLink
+  Plus
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -44,7 +43,7 @@ const FramerDashboard = () => {
 
       setMetrics(metricsData);
       setRealTimeUsage(usageData || []);
-      
+
       const sortedTenants = [...(tenantsData || [])]
         .sort((a, b) => (parseFloat(b.cost) || 0) - (parseFloat(a.cost) || 0))
         .slice(0, 5);
@@ -65,7 +64,12 @@ const FramerDashboard = () => {
       setError(null);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
-      setError('Unable to reach backend service at port 3001. Ensure database and API are running.');
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) {
+        setError('auth');
+      } else {
+        setError('connection');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -78,61 +82,108 @@ const FramerDashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
+  /* ── Skeleton loader ── */
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
-        <div className="w-10 h-10 border-2 border-[#e3e8ee] border-t-[#533afd] rounded-full animate-spin mb-4" />
-        <div className="font-heading-sm text-[#0d253d]">Loading financial telemetry...</div>
-        <div className="text-xs text-[#64748d] mt-1">Connecting to PostgreSQL engine & verifying rates</div>
-      </div>
+    const SkeletonBar = ({ w = 'w-full', h = 'h-4' }) => (
+      <div className={`${w} ${h} rounded-lg bg-[#e3e8ee] animate-pulse`} />
     );
-  }
-
-  if (error) {
     return (
-      <div className="card-stripi p-8 max-w-xl mx-auto my-8 text-center bg-white border border-[#ea2261]/30">
-        <div className="w-12 h-12 rounded-full bg-[#ea2261]/10 text-[#ea2261] flex items-center justify-center mx-auto mb-4">
-          <AlertTriangle className="w-6 h-6" />
+      <div className="space-y-8 animate-in fade-in duration-300">
+        {/* Header skeleton */}
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <SkeletonBar w="w-48" h="h-5" />
+            <SkeletonBar w="w-72" h="h-3" />
+          </div>
+          <SkeletonBar w="w-28" h="h-9" />
         </div>
-        <h2 className="text-xl font-normal text-[#0d253d] mb-2">Engine Disconnected</h2>
-        <p className="text-sm text-[#64748d] mb-6 leading-relaxed">{error}</p>
-        <button onClick={() => fetchData(true)} className="btn-primary-pill">
-          Retry Connection
-        </button>
+
+        {/* Stat cards skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white border border-[#e3e8ee] rounded-2xl p-5 space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <SkeletonBar w="w-24" h="h-3" />
+                <div className="w-8 h-8 rounded-lg bg-[#e3e8ee] animate-pulse" />
+              </div>
+              <SkeletonBar w="w-32" h="h-7" />
+              <SkeletonBar w="w-40" h="h-3" />
+            </div>
+          ))}
+        </div>
+
+        {/* Two-column skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white border border-[#e3e8ee] rounded-2xl p-6 space-y-4 shadow-sm">
+            <SkeletonBar w="w-40" h="h-4" />
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex items-center gap-4">
+                <SkeletonBar w="w-24" h="h-3" />
+                <div className="flex-1"><SkeletonBar h="h-2" /></div>
+                <SkeletonBar w="w-12" h="h-3" />
+              </div>
+            ))}
+          </div>
+          <div className="bg-white border border-[#e3e8ee] rounded-2xl p-6 space-y-4 shadow-sm">
+            <SkeletonBar w="w-32" h="h-4" />
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-[#e3e8ee] animate-pulse shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <SkeletonBar h="h-3" />
+                  <SkeletonBar w="w-2/3" h="h-2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
-  const isGrowthPositive = (metrics?.monthlyGrowth || 0) >= 0;
+  const defaultMetrics = {
+    monthlyRevenue: '0.00',
+    totalRevenue: '0.00',
+    monthlyGrowth: 0,
+    activeTenants: 0,
+    totalTenants: 0,
+    totalEvents: 0,
+    avgUsage: 0,
+    totalApiCalls: 0,
+    totalAiTokens: 0,
+    billingStatus: { paid: 0, pending: 0, failed: 0 }
+  };
+  const activeMetrics = metrics || defaultMetrics;
+  const isGrowthPositive = (activeMetrics.monthlyGrowth || 0) >= 0;
 
   const statCards = [
     {
       title: 'Monthly Billed Revenue',
-      value: `$${metrics?.monthlyRevenue || '0.00'}`,
-      aux: `Total Lifetime: $${metrics?.totalRevenue || '0.00'}`,
-      badge: `${isGrowthPositive ? '+' : ''}${metrics?.monthlyGrowth || 0}%`,
+      value: `$${activeMetrics.monthlyRevenue || '0.00'}`,
+      aux: `Total Lifetime: $${activeMetrics.totalRevenue || '0.00'}`,
+      badge: `${isGrowthPositive ? '+' : ''}${activeMetrics.monthlyGrowth || 0}%`,
       badgePositive: isGrowthPositive,
       icon: DollarSign,
     },
     {
       title: 'Active Provisioned Tenants',
-      value: metrics?.activeTenants || 0,
-      aux: `Registered: ${metrics?.totalTenants || 0} scoped accounts`,
+      value: activeMetrics.activeTenants || 0,
+      aux: `Registered: ${activeMetrics.totalTenants || 0} scoped accounts`,
       badge: 'Active Scoped',
       badgePositive: true,
       icon: Users,
     },
     {
       title: 'Total Billable Events',
-      value: (metrics?.totalEvents || 0).toLocaleString(),
-      aux: `Avg: ${metrics?.avgUsage || 0} / tenant`,
-      badge: `${(metrics?.totalApiCalls || 0).toLocaleString()} calls`,
+      value: (activeMetrics.totalEvents || 0).toLocaleString(),
+      aux: `Avg: ${activeMetrics.avgUsage || 0} / tenant`,
+      badge: `${(activeMetrics.totalApiCalls || 0).toLocaleString()} calls`,
       badgePositive: true,
       icon: Activity,
     },
     {
       title: 'AI Tokens Accumulated',
-      value: (metrics?.totalAiTokens || 0).toLocaleString(),
+      value: (activeMetrics.totalAiTokens || 0).toLocaleString(),
       aux: 'Sub-cent micro-unit arithmetic ($0.000001)',
       badge: 'Exact Rate',
       badgePositive: true,
@@ -142,12 +193,46 @@ const FramerDashboard = () => {
 
   return (
     <div className="space-y-8">
+      {/* Non-blocking Notice Banner if unassigned or offline */}
+      {error && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-950 text-sm animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+            </div>
+            <div>
+              <div className="font-semibold text-xs uppercase tracking-wider text-amber-800">
+                {error === 'auth' ? 'Tenant Context Not Selected' : 'Backend Telemetry Offline'}
+              </div>
+              <div className="text-xs text-amber-900 mt-0.5">
+                {error === 'auth'
+                  ? 'Your account is not assigned to a tenant yet. Showing zero-state telemetry. Provision a tenant below or switch tenant from the sidebar.'
+                  : 'Unable to reach backend service at port 3001. Ensure database and API server are running.'}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => fetchData(true)}
+              className="btn-secondary-pill text-xs py-1.5 px-3 bg-white"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => navigate('/dashboard/tenants')}
+              className="btn-primary-pill text-xs py-1.5 px-3"
+            >
+              Provision Tenant
+            </button>
+          </div>
+        </div>
+      )}
       {/* Editorial Headline Tier */}
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-2">
         <div>
           <div className="flex items-center gap-2 mb-2">
             <span className="pill-tag-soft">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#533afd] animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[#84CC16] animate-pulse" />
               Real-time Ingestion Engine
             </span>
           </div>
@@ -166,7 +251,7 @@ const FramerDashboard = () => {
             disabled={refreshing}
             className="btn-secondary-pill"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-[#533afd] ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-[#4D7C0F] ${refreshing ? 'animate-spin' : ''}`} />
             <span>{refreshing ? 'Syncing...' : 'Sync Telemetry'}</span>
           </button>
           <button
@@ -180,103 +265,100 @@ const FramerDashboard = () => {
 
       {/* 4 Stat Cards on Near-White Surfaces */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {statCards.map((stat, i) => {
-          const Icon = stat.icon;
-          return (
-            <motion.div
-              key={stat.title}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="card-stripi p-6 bg-white relative overflow-hidden group hover:border-[#a8c3de]"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-medium text-[#64748d] uppercase tracking-wider">
-                  {stat.title}
-                </span>
-                <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full tnum ${
-                  stat.badgePositive 
-                    ? 'bg-[#10b981]/10 text-[#059669]' 
-                    : 'bg-[#ea2261]/10 text-[#ea2261]'
+        {statCards.map((stat, i) => (
+          <motion.div
+            key={stat.title}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className="card-stripi p-6 bg-white relative overflow-hidden group hover:border-[#a8c3de]"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xs font-medium text-[#64748d] uppercase tracking-wider">
+                {stat.title}
+              </span>
+              <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full tnum ${stat.badgePositive
+                ? 'bg-[#10b981]/10 text-[#059669]'
+                : 'bg-[#ea2261]/10 text-[#ea2261]'
                 }`}>
-                  {stat.badgePositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                  {stat.badge}
-                </span>
-              </div>
+                {stat.badgePositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                {stat.badge}
+              </span>
+            </div>
 
-              {/* Tabular Figure Display Number */}
-              <div className="font-display-lg text-[#0d253d] tracking-display-lg tnum mb-1">
-                {stat.value}
-              </div>
+            {/* Tabular Figure Display Number */}
+            <div className="font-display-lg text-[#0d253d] tracking-display-lg tnum mb-1">
+              {stat.value}
+            </div>
 
-              <div className="text-[12px] text-[#64748d] tnum leading-tight">
-                {stat.aux}
-              </div>
+            <div className="text-[12px] text-[#64748d] tnum leading-tight">
+              {stat.aux}
+            </div>
 
-              {/* Discreet bottom accent hairline on hover */}
-              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#533afd] opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-            </motion.div>
-          );
-        })}
+            {/* Discreet bottom accent hairline on hover */}
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#D4FF28] opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+          </motion.div>
+        ))}
       </div>
 
       {/* Billing Status Bar */}
-      {metrics?.billingStatus && (
-        <div className="card-stripi p-6 bg-white">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-[#533afd]/10 text-[#533afd] flex items-center justify-center">
-                <Receipt className="w-4 h-4" />
+      {
+        metrics?.billingStatus && (
+          <div className="card-stripi p-6 bg-white">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-[#D4FF28]/25 text-[#3F6212] flex items-center justify-center">
+                  <Receipt className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-normal text-[#0d253d] tracking-tight">
+                    Billing Period Lifecycle & Settlement
+                  </h3>
+                  <p className="text-xs text-[#64748d]">Monthly cycle reconciliation with Stripe test mode</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-normal text-[#0d253d] tracking-tight">
-                  Billing Period Lifecycle & Settlement
-                </h3>
-                <p className="text-xs text-[#64748d]">Monthly cycle reconciliation with Stripe test mode</p>
-              </div>
+
+              <button
+                onClick={() => navigate('/dashboard/history')}
+                className="text-xs font-normal text-[#3F6212] hover:text-[#1A2E05] flex items-center gap-1 transition-colors self-start sm:self-auto font-medium"
+              >
+                View All Invoices <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            <button
-              onClick={() => navigate('/dashboard/history')}
-              className="text-xs font-normal text-[#533afd] hover:text-[#4434d4] flex items-center gap-1 transition-colors self-start sm:self-auto"
-            >
-              View All Invoices <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                <CheckCircle2 className="w-4 h-4 text-[#10b981] shrink-0" />
+                <div>
+                  <div className="text-sm font-normal text-[#0d253d] tnum">
+                    <span className="font-medium">{metrics.billingStatus.paid}</span> Paid & Settled
+                  </div>
+                  <div className="text-[11px] text-[#64748d]">Synchronized via Stripe webhooks</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                <Clock className="w-4 h-4 text-[#9b6829] shrink-0" />
+                <div>
+                  <div className="text-sm font-normal text-[#0d253d] tnum">
+                    <span className="font-medium">{metrics.billingStatus.pending}</span> Open / Pending
+                  </div>
+                  <div className="text-[11px] text-[#64748d]">Generated with unique period lock</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
+                <AlertTriangle className="w-4 h-4 text-[#ea2261] shrink-0" />
+                <div>
+                  <div className="text-sm font-normal text-[#0d253d] tnum">
+                    <span className="font-medium">{metrics.billingStatus.failed}</span> Payment Failed
+                  </div>
+                  <div className="text-[11px] text-[#64748d]">Requires automatic retry or update</div>
+                </div>
+              </div>
+            </div>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
-              <CheckCircle2 className="w-4 h-4 text-[#10b981] shrink-0" />
-              <div>
-                <div className="text-sm font-normal text-[#0d253d] tnum">
-                  <span className="font-medium">{metrics.billingStatus.paid}</span> Paid & Settled
-                </div>
-                <div className="text-[11px] text-[#64748d]">Synchronized via Stripe webhooks</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
-              <Clock className="w-4 h-4 text-[#9b6829] shrink-0" />
-              <div>
-                <div className="text-sm font-normal text-[#0d253d] tnum">
-                  <span className="font-medium">{metrics.billingStatus.pending}</span> Open / Pending
-                </div>
-                <div className="text-[11px] text-[#64748d]">Generated with unique period lock</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 p-3.5 rounded-lg bg-[#f6f9fc] border border-[#e3e8ee]">
-              <AlertTriangle className="w-4 h-4 text-[#ea2261] shrink-0" />
-              <div>
-                <div className="text-sm font-normal text-[#0d253d] tnum">
-                  <span className="font-medium">{metrics.billingStatus.failed}</span> Payment Failed
-                </div>
-                <div className="text-[11px] text-[#64748d]">Requires automatic retry or update</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
 
       {/* Middle Section: 24h Usage Trend Chart & Composited Dark Console Log */}
       <div className="grid lg:grid-cols-12 gap-6">
@@ -312,11 +394,11 @@ const FramerDashboard = () => {
                         initial={{ height: 0 }}
                         animate={{ height: `${heightPercent}%` }}
                         transition={{ duration: 0.5, delay: idx * 0.04 }}
-                        className="w-full bg-[#533afd] hover:bg-[#4434d4] rounded-t-sm transition-colors cursor-pointer"
+                        className="w-full bg-[#D4FF28] hover:bg-[#BEF218] rounded-t-sm transition-colors cursor-pointer border-t border-[#C4EF1E]"
                         style={{
-                          background: idx === realTimeUsage.length - 1 
-                            ? 'linear-gradient(180deg, #665efd 0%, #533afd 100%)' 
-                            : '#533afd'
+                          background: idx === realTimeUsage.length - 1
+                            ? 'linear-gradient(180deg, #D4FF28 0%, #A3E635 100%)'
+                            : '#D4FF28'
                         }}
                       />
                     </div>
@@ -345,7 +427,7 @@ const FramerDashboard = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-[#ea2261]" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#9b6829]" />
                 <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
-                <span className="text-xs text-[#533afd] font-mono ml-2">stream.metered_events</span>
+                <span className="text-xs text-[#3F6212] font-mono ml-2 font-medium">stream.metered_events</span>
               </div>
               <span className="text-[10px] text-[#64748d] font-mono uppercase tracking-wider">Live Tail</span>
             </div>
@@ -365,111 +447,130 @@ const FramerDashboard = () => {
                   </div>
                 ))
               ) : (
-                <div className="py-8 text-center text-xs text-[#64748d] font-mono">
-                  Listening on /api/usage...
+                  <div className="py-8 text-center space-y-2">
+                    <div className="w-8 h-8 rounded-full bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center mx-auto text-slate-400">
+                      <Activity className="w-4 h-4 text-[#10b981] animate-pulse" />
+                    </div>
+                    <div className="text-xs font-mono text-[#0d253d] font-medium">Stream Idle</div>
+                    <div className="text-[11px] text-[#64748d] font-mono">Listening on /api/usage for incoming telemetry...</div>
+                  </div>
+                        )}
                 </div>
-              )}
+                    </div>
+
+            <div className="pt-4 border-t border-[#e3e8ee] mt-4 flex items-center justify-between text-xs text-[#64748d]">
+              <span className="flex items-center gap-1.5">
+                <Terminal className="w-3.5 h-3.5 text-[#4D7C0F]" />
+                HMAC SHA-256 Validated
+              </span>
+              <button
+                onClick={() => navigate('/dashboard/usage')}
+                className="text-[#3F6212] hover:text-[#1A2E05] font-medium transition-colors flex items-center gap-1"
+              >
+                Inspect Feed <ChevronRight className="w-3 h-3" />
+              </button>
             </div>
           </div>
-
-          <div className="pt-4 border-t border-[#e3e8ee] mt-4 flex items-center justify-between text-xs text-[#64748d]">
-            <span className="flex items-center gap-1.5">
-              <Terminal className="w-3.5 h-3.5 text-[#533afd]" />
-              HMAC SHA-256 Validated
-            </span>
-            <button
-              onClick={() => navigate('/dashboard/usage')}
-              className="text-[#533afd] hover:text-[#4434d4] font-medium transition-colors flex items-center gap-1"
-            >
-              Inspect Feed <ChevronRight className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Warm Cream Interlude Card (Stripi Chromatic Interlude) */}
-      <div className="card-cream p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-[#9b6829]">Financial Guarantee</span>
-          </div>
-          <h3 className="font-heading-md text-[#0d253d] mb-1">
-            Zero Sub-Cent Financial Rounding Loss
-          </h3>
-          <p className="text-sm text-[#273951] max-w-2xl leading-relaxed">
-            Requests consuming micro-token payloads ($0.000045) are never rounded down to zero. The accumulator preserves sub-cent fractional values across billing cycles for exact invoicing.
-          </p>
         </div>
 
-        <button 
-          onClick={() => navigate('/dashboard/settings')}
-          className="btn-on-dark-pill shrink-0 self-start md:self-auto"
-        >
-          View Pricing Rules
-        </button>
-      </div>
-
-      {/* Top Tenants Table on White Surface */}
-      <div className="card-stripi p-6 sm:p-8 bg-white">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-[#e3e8ee]">
+        {/* Warm Cream Interlude Card (Stripi Chromatic Interlude) */}
+        <div className="card-cream p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
-            <h2 className="font-heading-md text-[#0d253d]">Active Account Consumption</h2>
-            <p className="text-xs text-[#64748d] mt-0.5">MTD consumption and billable totals ranked by tenant</p>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-[#9b6829]">Financial Guarantee</span>
+            </div>
+            <h3 className="font-heading-md text-[#0d253d] mb-1">
+              Zero Sub-Cent Financial Rounding Loss
+            </h3>
+            <p className="text-sm text-[#273951] max-w-2xl leading-relaxed">
+              Requests consuming micro-token payloads ($0.000045) are never rounded down to zero. The accumulator preserves sub-cent fractional values across billing cycles for exact invoicing.
+            </p>
           </div>
+
           <button
-            onClick={() => navigate('/dashboard/tenants')}
-            className="btn-secondary-pill text-xs py-1.5 px-3 self-start sm:self-auto"
+            onClick={() => navigate('/dashboard/settings')}
+            className="btn-on-dark-pill shrink-0 self-start md:self-auto"
           >
-            Manage Accounts
+            View Pricing Rules
           </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-[#e3e8ee] text-xs uppercase tracking-wider text-[#64748d]">
-                <th className="pb-3 font-normal">Account Name</th>
-                <th className="pb-3 font-normal">Billing Email</th>
-                <th className="pb-3 font-normal">Tier</th>
-                <th className="pb-3 font-normal text-right">Metered Units</th>
-                <th className="pb-3 font-normal text-right">MTD Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#e3e8ee]">
-              {topTenants.length > 0 ? (
-                topTenants.map((tenant) => (
-                  <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
-                    <td className="py-3.5 pr-4">
-                      <div className="font-normal text-[#0d253d]">{tenant.name}</div>
-                      <div className="text-[11px] text-[#64748d] font-mono tnum">{tenant.id.substring(0, 8)}...</div>
-                    </td>
-                    <td className="py-3.5 px-4 text-[#273951]">{tenant.email}</td>
-                    <td className="py-3.5 px-4">
-                      <span className="pill-tag-soft">
-                        {tenant.plan || 'Free'}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-mono tnum text-[#0d253d]">
-                      {(tenant.usage || 0).toLocaleString()}
-                    </td>
-                    <td className="py-3.5 pl-4 text-right font-medium text-[#0d253d] tnum">
-                      ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="5" className="py-8 text-center text-[#64748d] text-sm">
-                    No tenants found. Click "Provision Tenant" to create your first account.
-                  </td>
+        {/* Top Tenants Table on White Surface */}
+        <div className="card-stripi p-6 sm:p-8 bg-white">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-[#e3e8ee]">
+            <div>
+              <h2 className="font-heading-md text-[#0d253d]">Active Account Consumption</h2>
+              <p className="text-xs text-[#64748d] mt-0.5">MTD consumption and billable totals ranked by tenant</p>
+            </div>
+            <button
+              onClick={() => navigate('/dashboard/tenants')}
+              className="btn-secondary-pill text-xs py-1.5 px-3 self-start sm:self-auto"
+            >
+              Manage Accounts
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[#e3e8ee] text-xs uppercase tracking-wider text-[#64748d]">
+                  <th className="pb-3 font-normal">Account Name</th>
+                  <th className="pb-3 font-normal">Billing Email</th>
+                  <th className="pb-3 font-normal">Tier</th>
+                  <th className="pb-3 font-normal text-right">Metered Units</th>
+                  <th className="pb-3 font-normal text-right">MTD Total</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-[#e3e8ee]">
+                {topTenants.length > 0 ? (
+                  topTenants.map((tenant) => (
+                    <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
+                      <td className="py-3.5 pr-4">
+                        <div className="font-normal text-[#0d253d]">{tenant.name}</div>
+                        <div className="text-[11px] text-[#64748d] font-mono tnum">{tenant.id.substring(0, 8)}...</div>
+                      </td>
+                      <td className="py-3.5 px-4 text-[#273951]">{tenant.email}</td>
+                      <td className="py-3.5 px-4">
+                        <span className="pill-tag-soft">
+                          {tenant.plan || 'Free'}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono tnum text-[#0d253d]">
+                        {(tenant.usage || 0).toLocaleString()}
+                      </td>
+                      <td className="py-3.5 pl-4 text-right font-medium text-[#0d253d] tnum">
+                        ${tenant.cost ? parseFloat(tenant.cost).toFixed(2) : '0.00'}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                      <td colSpan="5" className="py-12 text-center">
+                        <div className="max-w-xs mx-auto text-center">
+                          <div className="w-10 h-10 rounded-xl bg-[#f6f9fc] border border-[#e3e8ee] flex items-center justify-center mx-auto mb-2.5 text-slate-400">
+                            <Users className="w-5 h-5 text-[#4D7C0F]" />
+                          </div>
+                          <div className="text-xs font-semibold text-[#0d253d] mb-1">No Tenants Registered</div>
+                          <p className="text-[11px] text-[#64748d] mb-3">
+                            Accounts provisioned with meter quotas will appear here ranked by consumption.
+                          </p>
+                          <button
+                            onClick={() => navigate('/dashboard/tenants')}
+                            className="btn-primary-pill text-xs py-1.5 px-3 inline-flex items-center gap-1.5"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Provision Tenant
+                          </button>
+                        </div>
+                      </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-    </div>
-  );
-};
+      );
+          };
 
-export default FramerDashboard;
+      export default FramerDashboard;

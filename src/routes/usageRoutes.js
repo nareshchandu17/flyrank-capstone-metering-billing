@@ -1,12 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const usageController = require('../controllers/usageController');
-const { requireTenantOrAdmin, requireAdminAuth } = require('../middleware/auth');
+const { requireAuth0User, requirePlatformAdmin, requirePermission } = require('../middleware/auth');
+const { PERMISSIONS } = require('../config/permissions');
 
-// Usage analytics endpoints (Protected by Tenant or Admin Auth)
-router.get('/stats', requireTenantOrAdmin, usageController.getUsageStats);
-router.get('/events/:tenant_id', requireTenantOrAdmin, usageController.getUsageEvents);
-router.get('/endpoints', requireTenantOrAdmin, usageController.getTopEndpoints);
-router.get('/resources', requireAdminAuth, usageController.getResourceUsage);
+// All usage dashboard endpoints require Auth0 authentication
+router.use(requireAuth0User);
+
+router.get('/stats', requirePermission(PERMISSIONS.USAGE_VIEW), usageController.getUsageStats);
+router.get('/events/:tenant_id', requirePermission(PERMISSIONS.USAGE_VIEW), usageController.getUsageEvents);
+router.get('/endpoints', requirePermission(PERMISSIONS.USAGE_VIEW), usageController.getTopEndpoints);
+router.get('/resources', requirePlatformAdmin, usageController.getResourceUsage);
 
 module.exports = router;

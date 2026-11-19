@@ -120,9 +120,18 @@ class InvoiceService {
     // 4. Construct accurate line items
     const lineItems = [];
 
-    // Base Plan Subscription fee (e.g. Pro $29/mo)
+    // Check if tenant has an active recurring Stripe subscription
+    // Checkout already creates the recurring subscription charge, so usage invoices must not repeat that charge!
+    const activeSubRes = await pool.query(
+      "SELECT id, stripe_subscription_id FROM subscriptions WHERE tenant_id = $1 AND status = 'active' AND stripe_subscription_id IS NOT NULL",
+      [tenantId]
+    );
+    const hasActiveStripeSub = activeSubRes.rows.length > 0;
+
     const basePlanCents = planConfig.base_price_cents || 0;
-    if (basePlanCents > 0) {
+    const shouldIncludeBaseFee = options.includeBaseSubscriptionFee === true || (!hasActiveStripeSub && basePlanCents > 0);
+
+    if (shouldIncludeBaseFee && basePlanCents > 0) {
       lineItems.push({
         description: `${tenant.plan_name} Plan Monthly Subscription`,
         quantity: 1,
@@ -140,47 +149,61 @@ class InvoiceService {
       });
     }
 
-    // AI Token components calculated accurately without flooring small amounts
+    // AI Token components calculated accurately with micro-cent precision
     const inputExact = (inputTokens * PRICING_CONFIG.ai_tokens.input_tokens.cost_per_million) / 1000000;
     const cachedExact = (cachedInputTokens * PRICING_CONFIG.ai_tokens.cached_input_tokens.cost_per_million) / 1000000;
     const outputExact = (outputTokens * PRICING_CONFIG.ai_tokens.output_tokens.cost_per_million) / 1000000;
     const reasoningExact = (reasoningTokens * PRICING_CONFIG.ai_tokens.reasoning_tokens.cost_per_million) / 1000000;
 
-    const inputCents = inputExact > 0 && inputExact < 1 ? 1 : Math.round(inputExact);
-    const cachedCents = cachedExact > 0 && cachedExact < 1 ? 1 : Math.round(cachedExact);
-    const outputCents = outputExact > 0 && outputExact < 1 ? 1 : Math.round(outputExact);
-    const reasoningCents = reasoningExact > 0 && reasoningExact < 1 ? 1 : Math.round(reasoningExact);
+    const totalAiCostExact = inputExact + cachedExact + outputExact + reasoningExact;
+    const totalAiCents = totalAiCostExact > 0 && totalAiCostExact < 1 ? 1 : Math.round(totalAiCostExact);
 
-    if (inputTokens > 0) {
-      lineItems.push({
-        description: `AI Input Tokens (${inputTokens.toLocaleString()} tokens @ $0.30/1M)`,
-        quantity: inputTokens,
-        amount_cents: inputCents
-      });
-    }
+    // Build line items matching the total exactly
+    if (totalAiCostExact > 0) {
+      const inputCents = Math.round(inputExact);
+      const cachedCents = Math.round(cachedExact);
+      const outputCents = Math.round(outputExact);
+      const reasoningCents = Math.round(reasoningExact);
 
-    if (cachedInputTokens > 0) {
-      lineItems.push({
-        description: `AI Cached Input Tokens (${cachedInputTokens.toLocaleString()} tokens @ $0.10/1M)`,
-        quantity: cachedInputTokens,
-        amount_cents: cachedCents
-      });
-    }
+      // If items round to 0 individually but total > 0, attribute to primary component
+      let allocated = 0;
 
-    if (outputTokens > 0) {
-      lineItems.push({
-        description: `AI Output Tokens (${outputTokens.toLocaleString()} tokens @ $0.60/1M)`,
-        quantity: outputTokens,
-        amount_cents: outputCents
-      });
-    }
+      if (inputTokens > 0) {
+        const amt = inputCents > 0 ? inputCents : (totalAiCents > 0 && allocated === 0 ? 1 : 0);
+        allocated += amt;
+        lineItems.push({
+          description: `AI Input Tokens (${inputTokens.toLocaleString()} tokens @ $0.30/1M)`,
+          quantity: inputTokens,
+          amount_cents: amt
+        });
+      }
 
-    if (reasoningTokens > 0) {
-      lineItems.push({
-        description: `AI Reasoning Tokens (${reasoningTokens.toLocaleString()} tokens @ $0.60/1M)`,
-        quantity: reasoningTokens,
-        amount_cents: reasoningCents
-      });
+      if (cachedInputTokens > 0) {
+        lineItems.push({
+          description: `AI Cached Input Tokens (${cachedInputTokens.toLocaleString()} tokens @ $0.10/1M)`,
+          quantity: cachedInputTokens,
+          amount_cents: cachedCents
+        });
+        allocated += cachedCents;
+      }
+
+      if (outputTokens > 0) {
+        lineItems.push({
+          description: `AI Output Tokens (${outputTokens.toLocaleString()} tokens @ $0.60/1M)`,
+          quantity: outputTokens,
+          amount_cents: outputCents
+        });
+        allocated += outputCents;
+      }
+
+      if (reasoningTokens > 0) {
+        lineItems.push({
+          description: `AI Reasoning Tokens (${reasoningTokens.toLocaleString()} tokens @ $0.60/1M)`,
+          quantity: reasoningTokens,
+          amount_cents: reasoningCents
+        });
+        allocated += reasoningCents;
+      }
     }
 
     // If tenant had zero usage and base price is zero, add 1 informational line item
@@ -251,39 +274,52 @@ class InvoiceService {
       client.release();
     }
 
-    // 6. Stripe Test-Mode Integration: Create actual Stripe Invoice if customer exists
+    // 6. Stripe Test-Mode Integration: Idempotent creation of Stripe invoice items and invoice
     let stripeInvoiceId = null;
     let hostedInvoiceUrl = null;
     let invoicePdf = null;
     let finalStatus = initialStatus;
     let paidAt = null;
 
+    const createStripe = options.createStripeInvoice !== false;
     const stripe = this.getStripeClient();
-    if (stripe && tenant.stripe_customer_id && totalAmountCents > 0) {
+
+    if (stripe && tenant.stripe_customer_id && totalAmountCents > 0 && createStripe) {
       try {
-        // Create line items in Stripe
-        for (const item of lineItems) {
+        // Create line items in Stripe with stable idempotency keys
+        for (let i = 0; i < lineItems.length; i++) {
+          const item = lineItems[i];
           if (item.amount_cents > 0) {
-            await stripe.invoiceItems.create({
-              customer: tenant.stripe_customer_id,
-              amount: item.amount_cents,
-              currency: 'usd',
-              description: item.description,
-            });
+            await stripe.invoiceItems.create(
+              {
+                customer: tenant.stripe_customer_id,
+                amount: item.amount_cents,
+                currency: 'usd',
+                description: item.description,
+              },
+              {
+                idempotencyKey: `invitem_${invoiceId}_${i}`
+              }
+            );
           }
         }
 
-        // Create Stripe Invoice
-        const stripeInvoice = await stripe.invoices.create({
-          customer: tenant.stripe_customer_id,
-          auto_advance: true,
-          collection_method: 'charge_automatically',
-          metadata: {
-            tenant_id: tenantId,
-            billing_period: period,
-            local_invoice_id: invoiceId
+        // Create Stripe Invoice with stable idempotency key
+        const stripeInvoice = await stripe.invoices.create(
+          {
+            customer: tenant.stripe_customer_id,
+            auto_advance: true,
+            collection_method: 'charge_automatically',
+            metadata: {
+              tenant_id: tenantId,
+              billing_period: period,
+              local_invoice_id: invoiceId
+            }
+          },
+          {
+            idempotencyKey: `inv_${invoiceId}`
           }
-        });
+        );
 
         // Finalize invoice so it is ready for payment
         const finalized = await stripe.invoices.finalizeInvoice(stripeInvoice.id);
@@ -311,7 +347,7 @@ class InvoiceService {
           [stripeInvoiceId, hostedInvoiceUrl, invoicePdf, finalStatus, paidAt, invoiceId]
         );
       } catch (stripeErr) {
-        console.error('Stripe invoice creation error (retaining local invoice):', stripeErr.message);
+        console.error('Stripe invoice creation error (retaining local invoice for recoverable sync):', stripeErr.message);
       }
     }
 
@@ -332,6 +368,114 @@ class InvoiceService {
         line_items: lineItems
       }
     };
+  }
+
+  /**
+   * Recoverable synchronization of an existing local invoice with Stripe.
+   * If local invoice failed to push to Stripe or was generated offline,
+   * pushes it to Stripe with idempotency keys and stores genuine Stripe metadata.
+   * 
+   * @param {string} invoiceId - Local invoice UUID
+   * @returns {Promise<Object>} - Synchronized invoice
+   */
+  async syncInvoiceToStripe(invoiceId) {
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      throw new Error('Stripe is not configured. Set STRIPE_SECRET_KEY in environment variables.');
+    }
+
+    const invoiceRes = await pool.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
+    if (invoiceRes.rows.length === 0) {
+      throw new Error('Invoice not found');
+    }
+
+    const invoice = invoiceRes.rows[0];
+    const tenantRes = await pool.query('SELECT * FROM tenants WHERE id = $1', [invoice.tenant_id]);
+    const tenant = tenantRes.rows[0];
+
+    // Ensure customer exists in Stripe
+    const customerId = await stripeService.getOrCreateCustomer(tenant);
+
+    // If Stripe invoice already exists, fetch latest status, PDF, and hosted URL
+    if (invoice.stripe_invoice_id) {
+      const stripeInv = await stripe.invoices.retrieve(invoice.stripe_invoice_id);
+      const status = stripeInv.status === 'paid' ? 'paid' : (stripeInv.status || invoice.status);
+      const paidAt = stripeInv.status_transitions?.paid_at
+        ? new Date(stripeInv.status_transitions.paid_at * 1000)
+        : invoice.paid_at;
+
+      await pool.query(
+        `UPDATE invoices 
+         SET status = $1,
+             hosted_invoice_url = COALESCE($2, hosted_invoice_url),
+             invoice_pdf = COALESCE($3, invoice_pdf),
+             paid_at = COALESCE($4, paid_at),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5`,
+        [status, stripeInv.hosted_invoice_url || null, stripeInv.invoice_pdf || null, paidAt, invoiceId]
+      );
+
+      return this.getInvoiceById(invoiceId);
+    }
+
+    // If no Stripe invoice exists yet, create items and invoice idempotently
+    const lineItemsRes = await pool.query(
+      'SELECT * FROM invoice_line_items WHERE invoice_id = $1 ORDER BY id ASC',
+      [invoiceId]
+    );
+    const lineItems = lineItemsRes.rows;
+
+    for (let i = 0; i < lineItems.length; i++) {
+      const item = lineItems[i];
+      if (item.amount_cents > 0) {
+        await stripe.invoiceItems.create(
+          {
+            customer: customerId,
+            amount: item.amount_cents,
+            currency: 'usd',
+            description: item.description,
+          },
+          {
+            idempotencyKey: `invitem_${invoiceId}_${i}`
+          }
+        );
+      }
+    }
+
+    const stripeInvoice = await stripe.invoices.create(
+      {
+        customer: customerId,
+        auto_advance: true,
+        collection_method: 'charge_automatically',
+        metadata: {
+          tenant_id: invoice.tenant_id,
+          billing_period: invoice.billing_period,
+          local_invoice_id: invoiceId
+        }
+      },
+      {
+        idempotencyKey: `inv_${invoiceId}`
+      }
+    );
+
+    const finalized = await stripe.invoices.finalizeInvoice(stripeInvoice.id);
+
+    const finalStatus = finalized.status === 'paid' ? 'paid' : (finalized.status || 'open');
+    const paidAt = finalized.status === 'paid' ? new Date() : null;
+
+    await pool.query(
+      `UPDATE invoices 
+       SET stripe_invoice_id = $1, 
+           hosted_invoice_url = $2, 
+           invoice_pdf = $3, 
+           status = $4,
+           paid_at = $5,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6`,
+      [finalized.id, finalized.hosted_invoice_url || null, finalized.invoice_pdf || null, finalStatus, paidAt, invoiceId]
+    );
+
+    return this.getInvoiceById(invoiceId);
   }
 
   /**

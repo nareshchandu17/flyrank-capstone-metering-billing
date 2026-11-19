@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const historyController = require('../controllers/historyController');
-const { requireTenantOrAdmin } = require('../middleware/auth');
+const { requireAuth0User, requirePermission } = require('../middleware/auth');
+const { PERMISSIONS } = require('../config/permissions');
 
-// History endpoints (Protected by Tenant or Admin Auth)
-router.use(requireTenantOrAdmin);
+// History & Invoicing endpoints require Auth0 authentication and BILLING_VIEW or USAGE_VIEW permission
+router.use(requireAuth0User);
 
-router.get('/transactions', historyController.getTransactions);
-router.get('/invoices', historyController.getInvoices);
-router.get('/summary', historyController.getTransactionSummary);
+router.get('/transactions', requirePermission(PERMISSIONS.USAGE_VIEW), historyController.getTransactions);
+router.get('/invoices', requirePermission(PERMISSIONS.INVOICES_VIEW), historyController.getInvoices);
+router.get('/summary', requirePermission(PERMISSIONS.BILLING_VIEW), historyController.getTransactionSummary);
 
 module.exports = router;

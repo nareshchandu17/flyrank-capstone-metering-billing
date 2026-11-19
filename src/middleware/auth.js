@@ -1,189 +1,274 @@
-const pool = require('../config/database');
+const { auth: expressAuth } = require('express-oauth2-jwt-bearer');
 const crypto = require('crypto');
+const pool = require('../config/database');
+const userService = require('../services/userService');
+const { ROLES, hasPermission } = require('../config/permissions');
 
-/**
- * Extract token/key from Authorization Bearer header, X-API-Key header, or X-Admin-Key header
- */
-function extractToken(req) {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.split(' ')[1].trim();
+// 1. Initialize Auth0 JWT verifier with express-oauth2-jwt-bearer
+let jwtCheck = null;
+
+function getJwtCheck() {
+  if (jwtCheck) return jwtCheck;
+
+  const issuerBaseURL = process.env.AUTH0_ISSUER_BASE_URL || (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : null);
+  const audience = process.env.AUTH0_AUDIENCE;
+
+  if (!issuerBaseURL || !audience) {
+    // In test or incomplete config, return a dynamic check handler
+    return (req, res, next) => {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized', message: 'Missing Authorization header' });
+      }
+      return res.status(500).json({
+        error: 'Configuration Error',
+        message: 'Auth0 issuer or audience is not configured on the server'
+      });
+    };
   }
-  if (req.headers['x-api-key']) {
-    return req.headers['x-api-key'].trim();
-  }
-  if (req.headers['x-admin-key']) {
-    return req.headers['x-admin-key'].trim();
-  }
-  return null;
+
+  jwtCheck = expressAuth({
+    audience,
+    issuerBaseURL,
+    tokenSigningAlg: 'RS256'
+  });
+
+  return jwtCheck;
 }
 
 /**
- * Middleware to authenticate API requests using Bearer token or X-API-Key
+ * Custom wrapper for Auth0 JWT verification that syncs the authenticated user with PostgreSQL
  */
-const requireApiKey = async (req, res, next) => {
-  try {
-    const apiKey = extractToken(req);
-    
-    if (!apiKey) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Missing or invalid Authorization header. Expected format: Bearer <API_KEY>'
-      });
-    }
+    const requireAuth0User = (req, res, next) => {
+      const handler = getJwtCheck();
+      handler(req, res, async (err) => {
+        if (err) {
+          console.warn('Auth0 JWT verification rejected:', err.message);
+          const statusCode = err.status || err.statusCode || 401;
+          return res.status(statusCode).json({
+            error: 'Unauthorized',
+            message: err.message || 'Invalid or expired Auth0 access token'
+          });
+        }
 
-    // Hash the provided key to compare with the database
-    const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-    
-    const result = await pool.query(
-      `SELECT k.id, k.tenant_id, k.status as key_status, k.revoked_at, t.status as tenant_status 
+        try {
+          // verified payload is attached by express-oauth2-jwt-bearer to req.auth.payload
+          const payload = req.auth?.payload || {};
+          const sub = payload.sub;
+
+          if (!sub) {
+            return res.status(401).json({
+              error: 'Unauthorized',
+              message: 'Token does not contain a subject (sub) claim'
+            });
+          }
+
+          // Synchronize authenticated user with PostgreSQL app_users table
+          const appUser = await userService.syncUserFromAuth0({
+            sub,
+            email: payload.email || payload[`${process.env.AUTH0_AUDIENCE}/email`] || null,
+            name: payload.name || payload[`${process.env.AUTH0_AUDIENCE}/name`] || null,
+            picture: payload.picture || null
+          });
+
+          req.user = appUser;
+          req.isPlatformAdmin = Boolean(appUser.isPlatformAdmin);
+          next();
+        } catch (syncErr) {
+          console.error('Error synchronizing Auth0 user in database:', syncErr);
+          return res.status(500).json({
+            error: 'Internal Server Error',
+            message: 'Failed to synchronize authenticated user session'
+          });
+        }
+      });
+    };
+
+    /**
+     * Middleware requiring verified Platform Admin status in PostgreSQL.
+     */
+    const requirePlatformAdmin = (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Unauthorized', message: 'Authentication required' });
+      }
+
+        if (!req.isPlatformAdmin) {
+          return res.status(403).json({
+            error: 'Forbidden',
+            message: 'Platform Admin privileges required for this operation'
+          });
+        }
+
+        next();
+      };
+
+      /**
+       * Helper to resolve the target tenant ID from request context
+       */
+      function resolveTargetTenantId(req) {
+        return (
+          req.params.tenant_id ||
+          req.params.id ||
+          req.headers['x-tenant-id'] ||
+          req.query.tenant_id ||
+          req.body?.tenant_id ||
+          null
+        );
+      }
+
+      /**
+       * Middleware to require a specific RBAC permission within a tenant context.
+       * 
+       * Rules:
+       * 1. Platform Admins have global access and bypass tenant membership requirements.
+       * 2. Regular users must have an active membership in the target tenant and hold a role with the required permission.
+       * 3. Never trusts client-claimed roles.
+       * 
+       * @param {string} requiredPermission - From permissions.js
+       */
+      const requirePermission = (requiredPermission) => {
+        return async (req, res, next) => {
+          if (!req.user) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'Authentication required' });
+          }
+
+          // Platform Admin has global permissions
+          if (req.isPlatformAdmin) {
+            req.currentRole = ROLES.PLATFORM_ADMIN;
+            req.tenantId = resolveTargetTenantId(req);
+            return next();
+          }
+
+          const tenantId = resolveTargetTenantId(req);
+          if (!tenantId) {
+            return res.status(400).json({
+              error: 'Bad Request',
+              message: 'Tenant context (tenant_id) is required for this operation'
+            });
+          }
+
+          try {
+            const membership = await userService.getUserMembershipForTenant(req.user.id, tenantId);
+
+            if (!membership || membership.membership_status !== 'active') {
+              return res.status(403).json({
+                error: 'Forbidden',
+                message: 'Access denied: You do not have an active membership in this tenant'
+              });
+            }
+
+            if (!hasPermission(membership.role, requiredPermission)) {
+              return res.status(403).json({
+                error: 'Forbidden',
+                message: `Access denied: Role "${membership.role}" lacks required permission "${requiredPermission}"`
+              });
+            }
+
+            req.currentRole = membership.role;
+            req.tenantId = tenantId;
+            req.tenantMembership = membership;
+            next();
+          } catch (err) {
+            console.error('Permission check error:', err);
+            return res.status(500).json({ error: 'Internal Server Error', message: 'Authorization error' });
+          }
+        };
+      };
+
+      /**
+       * Middleware for machine-to-machine API Key authentication (for usage ingestion, /api/usage, etc.)
+       */
+      const requireApiKey = async (req, res, next) => {
+        try {
+          let apiKey = null;
+          const authHeader = req.headers.authorization;
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+            apiKey = authHeader.split(' ')[1].trim();
+          } else if (req.headers['x-api-key']) {
+            apiKey = req.headers['x-api-key'].trim();
+          }
+
+          if (!apiKey) {
+            return res.status(401).json({
+              error: 'Unauthorized',
+              message: 'Missing or invalid Authorization header. Expected format: Bearer <API_KEY>'
+            });
+          }
+
+          const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
+
+          const result = await pool.query(
+            `SELECT k.id, k.tenant_id, k.status as key_status, k.revoked_at, t.status as tenant_status 
        FROM api_keys k
        JOIN tenants t ON k.tenant_id = t.id
        WHERE k.key_hash = $1`,
-      [keyHash]
-    );
+            [keyHash]
+          );
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid API key'
-      });
-    }
+          if (result.rows.length === 0) {
+            return res.status(401).json({
+              error: 'Unauthorized',
+              message: 'Invalid API key'
+            });
+          }
 
-    const keyRecord = result.rows[0];
+          const keyRecord = result.rows[0];
 
-    // Check if API key has been revoked
-    if (keyRecord.key_status === 'revoked' || keyRecord.revoked_at !== null) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'API key has been revoked'
-      });
-    }
+          if (keyRecord.key_status === 'revoked' || keyRecord.revoked_at !== null) {
+            return res.status(401).json({
+              error: 'Unauthorized',
+              message: 'API key has been revoked'
+            });
+          }
 
-    // Check if tenant account is active
-    if (keyRecord.tenant_status !== 'active') {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Tenant account is inactive or suspended'
-      });
-    }
+          if (keyRecord.tenant_status !== 'active') {
+            return res.status(403).json({
+              error: 'Forbidden',
+              message: 'Tenant account is inactive or suspended'
+            });
+          }
 
-    // Attach tenantId and apiKeyId to the request object
-    req.tenantId = keyRecord.tenant_id;
-    req.apiKeyId = keyRecord.id;
-    
-    // Update last_used_at async (don't block the request)
-    pool.query('UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = $1', [keyRecord.id])
-      .catch(err => console.error('Failed to update API key last_used_at:', err));
+          req.tenantId = keyRecord.tenant_id;
+          req.apiKeyId = keyRecord.id;
 
-    next();
-  } catch (error) {
-    console.error('Auth middleware error:', error);
-    res.status(500).json({ error: 'Internal server error during authentication' });
-  }
-};
+          pool.query('UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = $1', [keyRecord.id])
+            .catch(err => console.error('Failed to update API key last_used_at:', err));
 
-/**
- * Middleware to authenticate administrative operations
- */
-const requireAdminAuth = (req, res, next) => {
-  const adminKey = extractToken(req);
-  const configuredAdminKey = process.env.ADMIN_API_KEY || 'admin-secret-key';
+          next();
+        } catch (error) {
+          console.error('requireApiKey middleware error:', error);
+          res.status(500).json({ error: 'Internal server error during API key authentication' });
+        }
+      };
 
-  if (!adminKey || adminKey !== configuredAdminKey) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Missing or invalid administrative credentials'
-    });
-  }
+      /**
+       * Unified middleware allowing EITHER an Auth0 human user (with permitted role)
+       * OR a valid machine API key for tenant-scoped operations.
+       * 
+       * @param {string} requiredPermission - Required permission if authenticated as Auth0 human user
+       */
+      const requireTenantOrApiKey = (requiredPermission) => {
+        return async (req, res, next) => {
+          const authHeader = req.headers.authorization;
+          const xApiKey = req.headers['x-api-key'];
 
-  req.isAdmin = true;
-  req.user = { role: 'admin' };
-  next();
-};
+                // If explicit X-API-Key header is provided or token has sk_live_ prefix, treat as machine API key
+                if (xApiKey || (authHeader && authHeader.includes('sk_live_'))) {
+                  return requireApiKey(req, res, next);
+                }
 
-/**
- * Middleware allowing either admin credentials or a valid tenant API key.
- * Also enforces secure tenant scoping if a tenant_id param is present.
- */
-const requireTenantOrAdmin = async (req, res, next) => {
-  const token = extractToken(req);
-  const configuredAdminKey = process.env.ADMIN_API_KEY || 'admin-secret-key';
+    // Otherwise, authenticate as Auth0 User with database-backed permission check
+    return requireAuth0User(req, res, () => {
+                    return requirePermission(requiredPermission)(req, res, next);
+                  });
+              };
+            };
 
-  if (!token) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Authentication required. Provide an API key or administrative credentials.'
-    });
-  }
-
-  // 1. Check if it's admin credentials
-  if (token === configuredAdminKey) {
-    req.isAdmin = true;
-    req.user = { role: 'admin' };
-    return next();
-  }
-
-  // 2. Otherwise check if it's a valid tenant API key
-  try {
-    const keyHash = crypto.createHash('sha256').update(token).digest('hex');
-    const result = await pool.query(
-      `SELECT k.id, k.tenant_id, k.status as key_status, k.revoked_at, t.status as tenant_status 
-       FROM api_keys k
-       JOIN tenants t ON k.tenant_id = t.id
-       WHERE k.key_hash = $1`,
-      [keyHash]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid API key or credentials'
-      });
-    }
-
-    const keyRecord = result.rows[0];
-
-    if (keyRecord.key_status === 'revoked' || keyRecord.revoked_at !== null) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'API key has been revoked'
-      });
-    }
-
-    if (keyRecord.tenant_status !== 'active') {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Tenant account is inactive or suspended'
-      });
-    }
-
-    req.tenantId = keyRecord.tenant_id;
-    req.apiKeyId = keyRecord.id;
-
-    // Check tenant scoping if URL has :tenant_id
-    const targetTenantId = req.params.tenant_id;
-    if (targetTenantId && targetTenantId !== req.tenantId) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Access denied: You can only access data for your own tenant'
-      });
-    }
-
-    // Update last_used_at async
-    pool.query('UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = $1', [keyRecord.id])
-      .catch(err => console.error('Failed to update API key last_used_at:', err));
-
-    next();
-  } catch (error) {
-    console.error('requireTenantOrAdmin middleware error:', error);
-    res.status(500).json({ error: 'Internal server error during authentication' });
-  }
-};
-
-module.exports = {
-  extractToken,
-  requireApiKey,
-  requireAdminAuth,
-  requireTenantOrAdmin,
-};
+            module.exports = {
+              requireAuth0User,
+              requirePlatformAdmin,
+              requirePermission,
+              requireApiKey,
+              requireTenantOrApiKey,
+              resolveTargetTenantId
+            };

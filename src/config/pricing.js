@@ -51,6 +51,13 @@ const PRICING_CONFIG = {
       ai_tokens_limit: 1000000,
       allow_overage: true,
     },
+    Enterprise: {
+      name: 'Enterprise',
+      base_price_cents: 29900, // $299.00 / month
+      api_calls_limit: 1000000,
+      ai_tokens_limit: 50000000,
+      allow_overage: true,
+    },
   },
 };
 

@@ -1,21 +1,28 @@
 const express = require('express');
 const router = express.Router();
 const meterController = require('../controllers/meterController');
-const { requireApiKey, requireTenantOrAdmin } = require('../middleware/auth');
+const { 
+  requireApiKey, 
+  requireAuth0User, 
+  requirePermission 
+} = require('../middleware/auth');
+const { ingestionLimiter } = require('../middleware/rateLimiter');
+const { PERMISSIONS } = require('../config/permissions');
 
-// Health check
+// 1. Public Health Check
 router.get('/health', meterController.healthCheck);
 
-// Core metering endpoints (Protected by API Key)
-router.post('/usage', requireApiKey, meterController.recordUsage);
-router.post('/generate', requireApiKey, meterController.generate);
+// 2. Machine-to-Machine Ingestion & AI Generation (Strictly API-Key Authenticated)
+router.post('/usage', ingestionLimiter, requireApiKey, meterController.recordUsage);
+router.post('/generate', ingestionLimiter, requireApiKey, meterController.generate);
 
-// Tenant-scoped usage summaries and invoices (Protected by Tenant or Admin Auth)
-router.get('/usage', requireTenantOrAdmin, meterController.getUsageSummary);
-router.get('/usage/:tenant_id', requireTenantOrAdmin, meterController.getUsageSummary);
-router.get('/invoices', requireTenantOrAdmin, meterController.getInvoices);
-router.get('/invoices/:tenant_id', requireTenantOrAdmin, meterController.getInvoices);
-router.get('/invoices/detail/:id', requireTenantOrAdmin, meterController.getInvoiceDetail);
-router.post('/invoices/generate', requireTenantOrAdmin, meterController.generateInvoice);
+// 3. Human UI / Dashboard Invoicing & Summaries (Auth0 JWT + RBAC)
+router.get('/usage', requireAuth0User, requirePermission(PERMISSIONS.USAGE_VIEW), meterController.getUsageSummary);
+router.get('/usage/:tenant_id', requireAuth0User, requirePermission(PERMISSIONS.USAGE_VIEW), meterController.getUsageSummary);
+
+router.get('/invoices', requireAuth0User, requirePermission(PERMISSIONS.INVOICES_VIEW), meterController.getInvoices);
+router.get('/invoices/:tenant_id', requireAuth0User, requirePermission(PERMISSIONS.INVOICES_VIEW), meterController.getInvoices);
+router.get('/invoices/detail/:id', requireAuth0User, requirePermission(PERMISSIONS.INVOICES_VIEW), meterController.getInvoiceDetail);
+router.post('/invoices/generate', requireAuth0User, requirePermission(PERMISSIONS.INVOICES_GENERATE), meterController.generateInvoice);
 
 module.exports = router;

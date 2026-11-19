@@ -87,13 +87,17 @@ CREATE TABLE IF NOT EXISTS invoice_line_items (
     amount_cents INTEGER NOT NULL
 );
 
--- Webhook events table for replay-safe processing
+-- Webhook events table for replay-safe processing with lifecycle (received -> processing -> processed / failed)
 CREATE TABLE IF NOT EXISTS webhook_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     stripe_event_id VARCHAR(255) UNIQUE NOT NULL,
     event_type VARCHAR(100) NOT NULL,
-    status VARCHAR(50) DEFAULT 'processed',
-    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    status VARCHAR(50) DEFAULT 'received', -- 'received', 'processing', 'processed', 'failed'
+    attempts INTEGER DEFAULT 1,
+    error_message TEXT,
+    processed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- API Keys table
@@ -109,6 +113,84 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- =========================================================================
+-- AUTH0 & POSTGRESQL-BACKED RBAC SCHEMA
+-- =========================================================================
+
+-- Application users synchronized from Auth0
+CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    auth0_sub VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    name VARCHAR(255),
+    picture TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Platform Admins (bootstrap script or DB insertion required)
+CREATE TABLE IF NOT EXISTS platform_admins (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    granted_by VARCHAR(255) DEFAULT 'system',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+
+-- Tenant Memberships (Roles: Tenant Owner, Billing Manager, Developer, Viewer)
+CREATE TABLE IF NOT EXISTS tenant_memberships (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('Tenant Owner', 'Billing Manager', 'Developer', 'Viewer')),
+    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, user_id)
+);
+
+-- Tenant Invitations
+CREATE TABLE IF NOT EXISTS tenant_invitations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('Tenant Owner', 'Billing Manager', 'Developer', 'Viewer')),
+    token VARCHAR(255) UNIQUE NOT NULL,
+    invited_by UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
+    expires_at TIMESTAMP NOT NULL,
+    accepted_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Security and Administrative Audit Logs
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID REFERENCES tenants(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    actor_sub VARCHAR(255) NOT NULL,
+    actor_email VARCHAR(255),
+    action VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(100) NOT NULL,
+    resource_id VARCHAR(255),
+    metadata JSONB DEFAULT '{}'::jsonb,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for RBAC performance
+CREATE INDEX IF NOT EXISTS idx_app_users_auth0_sub ON app_users(auth0_sub);
+CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant ON tenant_memberships(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_user ON tenant_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_tenant ON tenant_invitations(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_email ON tenant_invitations(email);
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_token ON tenant_invitations(token);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_sub);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 
 -- Idempotent column migrations for existing databases
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
@@ -152,6 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_tenant ON invoices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_period ON invoices(tenant_id, billing_period);
 CREATE INDEX IF NOT EXISTS idx_invoices_stripe_id ON invoices(stripe_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_webhook_events_stripe_id ON webhook_events(stripe_event_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_status ON webhook_events(status);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
@@ -159,7 +242,8 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
 -- Insert default plans
 INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage) VALUES 
 ('Free', 1000, 100000, false),
-('Pro', 10000, 1000000, true)
+('Pro', 10000, 1000000, true),
+('Enterprise', 1000000, 50000000, true)
 ON CONFLICT (name) DO UPDATE SET allow_overage = EXCLUDED.allow_overage;
 
 -- Function to update updated_at timestamp

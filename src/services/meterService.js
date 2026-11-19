@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const notificationService = require('./notificationService');
 const { 
   PRICING_CONFIG, 
   calculateAPICallCost, 
@@ -206,7 +207,7 @@ class MeterService {
   async checkQuota(client, tenantId, usageType, requestedQuantity) {
     // Acquire row-level lock on tenant to guarantee concurrency-safety
     const tenantQuery = `
-      SELECT t.id, t.plan_id, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
+      SELECT t.id, t.name, t.email, t.plan_id, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
       FROM tenants t
       JOIN plans p ON t.plan_id = p.id
       WHERE t.id = $1 AND t.status = 'active'
@@ -255,7 +256,19 @@ class MeterService {
           [tenantId, alertType, billingPeriod, usageType]
         );
         if (alertRes.rows.length > 0) {
-          console.log(`[ALERT] Tenant ${tenantId} reached ${alertType} of their ${usageType} quota for ${billingPeriod}.`);
+          // Asynchronously dispatch real notifications (outbound webhooks / email)
+          notificationService.dispatchUsageAlert({
+            tenantId,
+            tenantName: tenant.name,
+            tenantEmail: tenant.email,
+            alertType,
+            metricType: usageType,
+            billingPeriod,
+            currentUsage: newUsage,
+            limit
+          }).catch(notifErr => {
+            console.error('Error dispatching usage alert notification:', notifErr.message);
+          });
         }
       } catch (err) {
         // Silently ignore if already recorded
