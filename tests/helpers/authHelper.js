@@ -8,8 +8,8 @@ const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
 });
 
-const TEST_AUTH0_ISSUER = 'https://flyrank-test.us.auth0.com/';
-const TEST_AUTH0_AUDIENCE = 'https://api.flyrank.com';
+const TEST_AUTH0_ISSUER = process.env.AUTH0_ISSUER_BASE_URL || (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : 'https://flyrank-test.us.auth0.com/');
+const TEST_AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE || 'https://api.flyrank-metering';
 
 /**
  * Generate a signed Auth0 access token

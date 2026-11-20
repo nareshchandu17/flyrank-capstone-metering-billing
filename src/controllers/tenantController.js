@@ -35,7 +35,7 @@ const getAllTenants = async (req, res) => {
     `;
 
     const result = await db.query(query, params);
-    
+
     // Enrich with exact real-time costs and quotas
     const enrichedTenants = [];
     for (const row of result.rows) {
@@ -67,7 +67,7 @@ const getAllTenants = async (req, res) => {
         created: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
       });
     }
-    
+
     res.json({ success: true, data: enrichedTenants });
   } catch (error) {
     console.error('Error fetching tenants:', error);
@@ -86,11 +86,11 @@ const getTenantById = async (req, res) => {
        WHERE t.id = $1`,
       [id]
     );
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
-    
+
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error fetching tenant:', error);
@@ -98,22 +98,27 @@ const getTenantById = async (req, res) => {
   }
 };
 
-// Create new tenant
+// Create new tenant atomically with initial Tenant Owner membership
 const createTenant = async (req, res) => {
+  const client = await db.connect();
   try {
     const { name, email, plan = 'Free', plan_id } = req.body;
-    
+
     // Validate input
     if (!name || !email) {
       return res.status(400).json({ success: false, message: 'Name and email are required' });
     }
-    
+
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required to create a tenant organization' });
+    }
+
     // Check if email already exists
-    const existing = await db.query(
+    const existing = await client.query(
       'SELECT id FROM tenants WHERE email = $1',
       [email]
     );
-    
+
     if (existing.rows.length > 0) {
       return res.status(400).json({ success: false, message: 'Email already exists' });
     }
@@ -121,37 +126,41 @@ const createTenant = async (req, res) => {
     // Resolve plan ID by plan name or ID
     let resolvedPlanId = plan_id;
     if (!resolvedPlanId) {
-      const planRes = await db.query('SELECT id FROM plans WHERE name = $1', [plan]);
+      const planRes = await client.query('SELECT id FROM plans WHERE name = $1', [plan]);
       if (planRes.rows.length === 0) {
         return res.status(400).json({ success: false, message: `Plan "${plan}" not found` });
       }
       resolvedPlanId = planRes.rows[0].id;
     }
-    
-    // Create tenant
-    const result = await db.query(
+
+      await client.query('BEGIN');
+
+    // 1. Create tenant record
+    const result = await client.query(
       `INSERT INTO tenants (name, email, plan_id, status, created_at, updated_at)
        VALUES ($1, $2, $3, 'active', NOW(), NOW())
        RETURNING *`,
       [name, email, resolvedPlanId]
     );
-    
+
     const createdTenant = result.rows[0];
 
-    // If request has an authenticated user, automatically assign them as Tenant Owner
-    if (req.user?.id) {
-      await db.query(
-        `INSERT INTO tenant_memberships (user_id, tenant_id, role, status)
-         VALUES ($1, $2, 'Tenant Owner', 'active')
-         ON CONFLICT (user_id, tenant_id) DO NOTHING`,
-        [req.user.id, createdTenant.id]
-      );
-    }
+    // 2. Atomically create initial Tenant Owner membership (prevents orphan tenants)
+    await client.query(
+      `INSERT INTO tenant_memberships (user_id, tenant_id, role, status)
+       VALUES ($1, $2, 'Tenant Owner', 'active')`,
+      [req.user.id, createdTenant.id]
+    );
+
+    await client.query('COMMIT');
 
     res.status(201).json({ success: true, data: createdTenant });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Error creating tenant:', error);
     res.status(500).json({ success: false, message: 'Failed to create tenant' });
+  } finally {
+    client.release();
   }
 };
 
@@ -160,13 +169,13 @@ const updateTenant = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, email, status, plan_id, plan } = req.body;
-    
+
     // Check if tenant exists
     const existing = await db.query(
       'SELECT id FROM tenants WHERE id = $1',
       [id]
     );
-    
+
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
@@ -178,7 +187,7 @@ const updateTenant = async (req, res) => {
         resolvedPlanId = planRes.rows[0].id;
       }
     }
-    
+
     // Update tenant
     const result = await db.query(
       `UPDATE tenants 
@@ -191,7 +200,7 @@ const updateTenant = async (req, res) => {
        RETURNING *`,
       [name, email, status, resolvedPlanId, id]
     );
-    
+
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error updating tenant:', error);
@@ -203,20 +212,20 @@ const updateTenant = async (req, res) => {
 const deleteTenant = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // Check if tenant exists
     const existing = await db.query(
       'SELECT id FROM tenants WHERE id = $1',
       [id]
     );
-    
+
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
-    
+
     // Delete tenant (cascade will handle related records)
     await db.query('DELETE FROM tenants WHERE id = $1', [id]);
-    
+
     res.json({ success: true, message: 'Tenant deleted successfully' });
   } catch (error) {
     console.error('Error deleting tenant:', error);
@@ -240,7 +249,7 @@ const getTenantUsage = async (req, res) => {
       `,
       [id]
     );
-    
+
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error fetching tenant usage:', error);
@@ -263,11 +272,11 @@ const getTenantSubscription = async (req, res) => {
       `,
       [id]
     );
-    
+
     if (result.rows.length === 0) {
       return res.json({ success: true, data: null });
     }
-    
+
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error fetching tenant subscription:', error);

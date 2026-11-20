@@ -12,13 +12,21 @@ class MeterController {
    */
   async recordUsage(req, res) {
     try {
-      // Inferred securely from API key (or admin request)
+      // Inferred securely from API key (or platform admin request)
       const tenant_id = req.tenantId || ((req.isPlatformAdmin || req.isAdmin) ? req.body.tenant_id : null);
       const { usage_type, quantity, idempotency_key, metadata } = req.body;
-      
+
       if (!tenant_id) {
         return res.status(400).json({
           error: 'Tenant ID could not be identified from authentication'
+        });
+      }
+
+      // Reject attempts to override API-key tenant with a different tenant_id in body
+      if (req.body.tenant_id && req.body.tenant_id !== req.tenantId && !req.isPlatformAdmin) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied: API key cannot submit usage for another tenant'
         });
       }
 
@@ -28,21 +36,21 @@ class MeterController {
           error: 'Missing required fields: usage_type, quantity, idempotency_key'
         });
       }
-      
+
       // Validate usage type
       if (!['api_call', 'ai_tokens'].includes(usage_type)) {
         return res.status(400).json({
           error: 'Invalid usage_type. Must be "api_call" or "ai_tokens"'
         });
       }
-      
+
       // Validate quantity is strictly a positive integer
       if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
         return res.status(400).json({
           error: 'Quantity must be a positive integer greater than zero'
         });
       }
-      
+
       const result = await meterService.recordUsage(
         tenant_id,
         usage_type,
@@ -50,7 +58,7 @@ class MeterController {
         idempotency_key,
         metadata
       );
-      
+
       if (result.status === 'conflict') {
         return res.status(result.statusCode || 409).json({
           error: result.message
@@ -63,19 +71,19 @@ class MeterController {
           quota_info: result.quotaInfo
         });
       }
-      
+
       if (result.status === 'duplicate') {
         return res.status(200).json({
           message: result.message,
           data: result.data
         });
       }
-      
+
       res.status(201).json({
         message: result.message,
         data: result.data
       });
-      
+
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({
@@ -88,7 +96,7 @@ class MeterController {
       });
     }
   }
-  
+
   /**
    * Get usage summary for tenant
    * GET /api/usage/:tenant_id or GET /api/usage
@@ -96,7 +104,7 @@ class MeterController {
   async getUsageSummary(req, res) {
     try {
       const targetTenantId = req.params.tenant_id || req.tenantId;
-      
+
       if (!targetTenantId) {
         return res.status(400).json({
           error: 'Tenant ID is required'
@@ -110,48 +118,73 @@ class MeterController {
           message: 'Access denied: You can only access data for your own tenant'
         });
       }
-      
+
       const summary = await meterService.getUsageSummary(targetTenantId);
-      
+
       res.status(200).json(summary);
-      
+
     } catch (error) {
       if (error.message === 'Tenant not found') {
         return res.status(404).json({
           error: 'Tenant not found'
         });
       }
-      
+
       console.error('Error getting usage summary:', error);
       res.status(500).json({
         error: 'Internal server error'
       });
     }
   }
-  
+
   /**
    * Real AI model generation & billable token accounting endpoint
    * POST /api/generate
    */
   async generate(req, res) {
     try {
-      const tenant_id = req.tenantId; // Inferred from API key
+      const tenant_id = req.tenantId; // Inferred from verified API key
       const { prompt, model } = req.body;
-      
+
+      if (!tenant_id) {
+        return res.status(400).json({ error: 'Tenant context required' });
+      }
+
       if (!prompt) {
         return res.status(400).json({
           error: 'Missing required fields: prompt'
         });
       }
-      
-      // Execute real AI model generation or BPE-aligned token engine
+
+      // 1. Verify tenant account is active
+      const tenantCheck = await pool.query('SELECT status FROM tenants WHERE id = $1', [tenant_id]);
+      if (tenantCheck.rows.length === 0 || tenantCheck.rows[0].status !== 'active') {
+        return res.status(403).json({ error: 'Forbidden', message: 'Tenant account is inactive or suspended' });
+      }
+
+      // 2. Preflight quota check before generating billable external AI request
+      const preflightClient = await pool.connect();
+      try {
+        const preflight = await meterService.checkQuota(preflightClient, tenant_id, 'ai_tokens', 10);
+        if (!preflight.allowed) {
+          return res.status(preflight.statusCode || 429).json({
+            error: preflight.message,
+            quota_info: preflight.quotaInfo
+          });
+        }
+      } finally {
+        preflightClient.release();
+      }
+
+      // 3. Execute real AI model generation or BPE-aligned token engine
       const completion = await aiService.generateCompletion(prompt, { model });
       const generated_text = completion.text;
       const tokens = completion.tokens;
       const totalTokens = tokens.total_tokens || (tokens.input_tokens + tokens.output_tokens);
-      
-      const idempotency_key = uuidv4();
-      
+
+      // Support client-supplied idempotency_key for safe client retries
+      const idempotency_key = req.body.idempotency_key || uuidv4();
+
       const metadata = {
         input_tokens: tokens.input_tokens,
         cached_input_tokens: tokens.cached_input_tokens || 0,
@@ -162,7 +195,7 @@ class MeterController {
         latency_ms: completion.latency_ms,
         prompt_preview: prompt.substring(0, 50)
       };
-      
+
       // Call meter service with full token breakdown
       const result = await meterService.recordUsage(
         tenant_id,
@@ -171,14 +204,14 @@ class MeterController {
         idempotency_key,
         metadata
       );
-      
+
       if (result.status === 'rejected') {
         return res.status(result.statusCode).json({
           error: result.message,
           quota_info: result.quotaInfo
         });
       }
-      
+
       // Return generated text along with real metering calculation
       res.status(200).json({
         message: 'Generation successful',
@@ -191,7 +224,7 @@ class MeterController {
           tokens: metadata
         }
       });
-      
+
     } catch (error) {
       console.error('Error in /generate endpoint:', error);
       res.status(500).json({
@@ -257,10 +290,10 @@ class MeterController {
           message: 'Access denied: You can only access data for your own tenant'
         });
       }
-      
+
       const invoices = await invoiceService.getInvoicesForTenant(targetTenantId);
       res.status(200).json(invoices);
-      
+
     } catch (error) {
       console.error('Error getting invoices:', error);
       res.status(500).json({
@@ -289,7 +322,7 @@ class MeterController {
       res.status(500).json({ error: 'Internal server error' });
     }
   }
-  
+
   /**
    * Health check endpoint
    * GET /api/health

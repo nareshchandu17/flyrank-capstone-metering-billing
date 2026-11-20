@@ -90,6 +90,13 @@ class MembershipService {
 
       // Protect against removing the last active Tenant Owner
       if (member.role === ROLES.TENANT_OWNER && (role !== ROLES.TENANT_OWNER || status === 'suspended')) {
+        // Lock all active owner rows in this tenant to prevent race conditions during concurrent removal
+        await client.query(
+          `SELECT id FROM tenant_memberships 
+           WHERE tenant_id = $1 AND role = $2 AND status = 'active' FOR UPDATE`,
+          [tenantId, ROLES.TENANT_OWNER]
+        );
+
         const ownerCountRes = await client.query(
           `SELECT COUNT(*) as count FROM tenant_memberships 
            WHERE tenant_id = $1 AND role = $2 AND status = 'active' AND id != $3`,
@@ -160,6 +167,13 @@ class MembershipService {
 
       // Protect against deleting the last active Tenant Owner
       if (member.role === ROLES.TENANT_OWNER) {
+        // Lock all active owner rows in this tenant to serialize concurrent owner changes
+        await client.query(
+          `SELECT id FROM tenant_memberships 
+           WHERE tenant_id = $1 AND role = $2 AND status = 'active' FOR UPDATE`,
+          [tenantId, ROLES.TENANT_OWNER]
+        );
+
         const ownerCountRes = await client.query(
           `SELECT COUNT(*) as count FROM tenant_memberships 
            WHERE tenant_id = $1 AND role = $2 AND status = 'active' AND id != $3`,
@@ -206,14 +220,15 @@ class MembershipService {
       throw err;
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     const result = await pool.query(
       `INSERT INTO tenant_invitations (tenant_id, email, role, token, invited_by, expires_at, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-       RETURNING id, tenant_id, email, role, token, expires_at, status, created_at`,
-      [tenantId, email.toLowerCase().trim(), role, token, actor?.id || null, expiresAt]
+       RETURNING id, tenant_id, email, role, expires_at, status, created_at`,
+      [tenantId, email.toLowerCase().trim(), role, tokenHash, actor?.id || null, expiresAt]
     );
 
     await auditService.log({
@@ -227,7 +242,10 @@ class MembershipService {
       metadata: { email, role, expires_at: expiresAt }
     });
 
-    return result.rows[0];
+    return {
+      ...result.rows[0],
+      token: rawToken
+    };
   }
 
   /**
@@ -252,107 +270,128 @@ class MembershipService {
     try {
       await client.query('BEGIN');
 
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
       const invResult = await client.query(
         `SELECT id, tenant_id, email, role, status, expires_at 
          FROM tenant_invitations 
-         WHERE token = $1 FOR UPDATE`,
-        [token]
-      );
+         WHERE (token = $1 OR token = $2) FOR UPDATE`,
+      [tokenHash, token]
+    );
 
-      if (invResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        const err = new Error('Invitation not found or invalid token');
-        err.statusCode = 404;
-        throw err;
-      }
+    if (invResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      const err = new Error('Invitation not found or invalid token');
+      err.statusCode = 404;
+      throw err;
+    }
 
-      const inv = invResult.rows[0];
+    const inv = invResult.rows[0];
 
-      if (inv.status !== 'pending') {
-        await client.query('ROLLBACK');
-        const err = new Error(`Invitation is already ${inv.status}`);
-        err.statusCode = 400;
-        throw err;
-      }
+    if (inv.status !== 'pending') {
+      await client.query('ROLLBACK');
+      const err = new Error(`Invitation is already ${inv.status}`);
+      err.statusCode = 400;
+      throw err;
+    }
 
-      if (new Date(inv.expires_at) < new Date()) {
-        await client.query('UPDATE tenant_invitations SET status = \'expired\' WHERE id = $1', [inv.id]);
-        await client.query('COMMIT');
-        const err = new Error('Invitation has expired');
-        err.statusCode = 400;
-        throw err;
-      }
+    if (new Date(inv.expires_at) < new Date()) {
+      await client.query('UPDATE tenant_invitations SET status = \'expired\' WHERE id = $1', [inv.id]);
+      await client.query('COMMIT');
+      const err = new Error('Invitation has expired');
+      err.statusCode = 400;
+      throw err;
+    }
 
-      // Add membership
-      await client.query(
-        `INSERT INTO tenant_memberships (tenant_id, user_id, role, status)
+    // Verify authenticated recipient's email matches the invited email
+    const userEmail = (currentUser.email || '').toLowerCase().trim();
+    const invitedEmail = (inv.email || '').toLowerCase().trim();
+    if (userEmail !== invitedEmail) {
+      await client.query('ROLLBACK');
+      const err = new Error(`Access denied: Authenticated user email (${userEmail}) does not match invited email (${invitedEmail})`);
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // Verify tenant account is active
+    const tenantCheck = await client.query('SELECT status FROM tenants WHERE id = $1', [inv.tenant_id]);
+    if (tenantCheck.rows.length === 0 || tenantCheck.rows[0].status !== 'active') {
+      await client.query('ROLLBACK');
+      const err = new Error('Tenant account is inactive or suspended');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // Add or update membership atomically
+    await client.query(
+      `INSERT INTO tenant_memberships (tenant_id, user_id, role, status)
          VALUES ($1, $2, $3, 'active')
          ON CONFLICT (tenant_id, user_id) DO UPDATE
          SET role = EXCLUDED.role, status = 'active', updated_at = CURRENT_TIMESTAMP`,
-        [inv.tenant_id, currentUser.id, inv.role]
-      );
+      [inv.tenant_id, currentUser.id, inv.role]
+    );
 
-      // Mark invitation accepted
-      await client.query(
-        `UPDATE tenant_invitations 
+    // Mark invitation accepted
+    await client.query(
+      `UPDATE tenant_invitations 
          SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
-        [inv.id]
-      );
+      [inv.id]
+    );
 
-      await client.query('COMMIT');
+    await client.query('COMMIT');
 
-      await auditService.log({
-        tenantId: inv.tenant_id,
-        userId: currentUser.id,
-        actorSub: currentUser.auth0_sub,
-        actorEmail: currentUser.email,
-        action: 'invitation.accepted',
-        resourceType: 'tenant_invitation',
-        resourceId: inv.id,
-        metadata: { role: inv.role }
-      });
+    await auditService.log({
+      tenantId: inv.tenant_id,
+      userId: currentUser.id,
+      actorSub: currentUser.auth0_sub,
+      actorEmail: currentUser.email,
+      action: 'invitation.accepted',
+      resourceType: 'tenant_invitation',
+      resourceId: inv.id,
+      metadata: { role: inv.role }
+    });
 
-      return { success: true, tenant_id: inv.tenant_id, role: inv.role };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    return { success: true, tenant_id: inv.tenant_id, role: inv.role };
+  } catch(err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
   }
 
   /**
    * Revoke an invitation
    */
   async revokeInvitation(tenantId, invitationId, actor) {
-    const result = await pool.query(
-      `UPDATE tenant_invitations 
+  const result = await pool.query(
+    `UPDATE tenant_invitations 
        SET status = 'revoked', updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND tenant_id = $2 AND status = 'pending'
        RETURNING id, email, role`,
-      [invitationId, tenantId]
-    );
+    [invitationId, tenantId]
+  );
 
-    if (result.rows.length === 0) {
-      const err = new Error('Invitation not found or already processed');
-      err.statusCode = 404;
-      throw err;
-    }
-
-    await auditService.log({
-      tenantId,
-      userId: actor?.id,
-      actorSub: actor?.auth0_sub || 'system',
-      actorEmail: actor?.email,
-      action: 'invitation.revoked',
-      resourceType: 'tenant_invitation',
-      resourceId: invitationId,
-      metadata: result.rows[0]
-    });
-
-    return { success: true };
+  if (result.rows.length === 0) {
+    const err = new Error('Invitation not found or already processed');
+    err.statusCode = 404;
+    throw err;
   }
+
+  await auditService.log({
+    tenantId,
+    userId: actor?.id,
+    actorSub: actor?.auth0_sub || 'system',
+    actorEmail: actor?.email,
+    action: 'invitation.revoked',
+    resourceType: 'tenant_invitation',
+    resourceId: invitationId,
+    metadata: result.rows[0]
+  });
+
+  return { success: true };
+}
 }
 
 module.exports = new MembershipService();

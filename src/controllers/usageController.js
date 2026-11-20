@@ -6,6 +6,10 @@ const getUsageStats = async (req, res) => {
   try {
     const isGlobal = req.isPlatformAdmin && !req.tenantId;
 
+    if (!isGlobal && !req.tenantId) {
+      return res.status(400).json({ success: false, message: 'Tenant context (tenant_id) is required' });
+    }
+
     let query = `
       SELECT 
         COUNT(*) as total_requests,
@@ -23,27 +27,31 @@ const getUsageStats = async (req, res) => {
     `;
     const params = [];
 
-    if (!isGlobal && req.tenantId) {
-      params.push(req.tenantId);
-      query += ` WHERE tenant_id = $1`;
+      if (!isGlobal) {
+        params.push(req.tenantId);
+        query += ` WHERE tenant_id = $1`;
+      }
+
+      const stats = await db.query(query, params);
+      res.json({ success: true, data: stats.rows[0] });
+    } catch (error) {
+      console.error('Error fetching usage stats:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch usage stats' });
     }
+  };
 
-    const stats = await db.query(query, params);
-    res.json({ success: true, data: stats.rows[0] });
-  } catch (error) {
-    console.error('Error fetching usage stats:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch usage stats' });
-  }
-};
+  // Get usage events for a tenant with strict scoping
+  const getUsageEvents = async (req, res) => {
+    try {
+      const targetTenantId = req.isPlatformAdmin ? (req.params.tenant_id || req.tenantId) : req.tenantId;
+      const { limit = 50, offset = 0 } = req.query;
 
-// Get usage events for a tenant with strict scoping
-const getUsageEvents = async (req, res) => {
-  try {
-    const targetTenantId = req.params.tenant_id || req.tenantId;
-    const { limit = 50, offset = 0 } = req.query;
+      if (!targetTenantId) {
+        return res.status(400).json({ success: false, message: 'Tenant context (tenant_id) is required' });
+      }
 
-    const result = await db.query(
-      `
+      const result = await db.query(
+        `
       SELECT 
         ue.*,
         t.name as tenant_name
@@ -53,22 +61,26 @@ const getUsageEvents = async (req, res) => {
       ORDER BY ue.created_at DESC
       LIMIT $2 OFFSET $3
       `,
-      [targetTenantId, parseInt(limit, 10), parseInt(offset, 10)]
-    );
+        [targetTenantId, parseInt(limit, 10), parseInt(offset, 10)]
+      );
 
-    res.json({ success: true, data: result.rows });
-  } catch (error) {
-    console.error('Error fetching usage events:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch usage events' });
-  }
-};
+      res.json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error('Error fetching usage events:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch usage events' });
+    }
+  };
 
-// Get top endpoints strictly scoped to tenant (or global if Platform Admin)
-const getTopEndpoints = async (req, res) => {
-  try {
-    const isGlobal = req.isPlatformAdmin && !req.tenantId;
+  // Get top endpoints strictly scoped to tenant (or global if Platform Admin)
+  const getTopEndpoints = async (req, res) => {
+    try {
+      const isGlobal = req.isPlatformAdmin && !req.tenantId;
 
-    let query = `
+      if (!isGlobal && !req.tenantId) {
+        return res.status(400).json({ success: false, message: 'Tenant context (tenant_id) is required' });
+      }
+
+      let query = `
       SELECT 
         COALESCE(metadata ->> 'endpoint', metadata ->> 'model', 'Standard API') as endpoint,
       COUNT(*) as requests,
@@ -76,66 +88,66 @@ const getTopEndpoints = async (req, res) => {
       COUNT(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) THEN 1 END) as monthly_requests
       FROM usage_events
       `;
-    const params = [];
+      const params = [];
 
-    if (!isGlobal && req.tenantId) {
-      params.push(req.tenantId);
-      query += ` WHERE tenant_id = $1`;
-    }
+        if (!isGlobal) {
+          params.push(req.tenantId);
+          query += ` WHERE tenant_id = $1`;
+        }
 
-    query += `
+        query += `
       GROUP BY COALESCE(metadata ->> 'endpoint', metadata ->> 'model', 'Standard API')
       ORDER BY requests DESC
       LIMIT 10
     `;
 
-    const result = await db.query(query, params);
-    res.json({ success: true, data: result.rows });
-  } catch (error) {
-    console.error('Error fetching top endpoints:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch top endpoints' });
-  }
-};
-
-// Get real measured resource usage (Platform Admin Only)
-const getResourceUsage = async (req, res) => {
-  try {
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const memoryPercent = Math.min(100, Math.max(1, Math.round(((totalMem - freeMem) / totalMem) * 100)));
-
-    const cpus = os.cpus();
-    let totalIdle = 0;
-    let totalTick = 0;
-    for (const cpu of cpus) {
-      for (const type in cpu.times) {
-        totalTick += cpu.times[type];
+        const result = await db.query(query, params);
+        res.json({ success: true, data: result.rows });
+      } catch (error) {
+        console.error('Error fetching top endpoints:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch top endpoints' });
       }
-      totalIdle += cpu.times.idle;
-    }
-    const cpuUsagePercent = totalTick > 0
-      ? Math.min(100, Math.max(1, Math.round((1 - (totalIdle / totalTick)) * 100)))
-      : 5;
+    };
 
-    res.json({
-      success: true,
-      data: {
-        cpu_usage_percent: cpuUsagePercent,
-        memory_usage_percent: memoryPercent,
-        uptime_seconds: Math.round(process.uptime()),
-        platform: os.platform(),
-        cpus_count: cpus.length
+    // Get real measured resource usage (Platform Admin Only)
+    const getResourceUsage = async (req, res) => {
+      try {
+        const totalMem = os.totalmem();
+        const freeMem = os.freemem();
+        const memoryPercent = Math.min(100, Math.max(1, Math.round(((totalMem - freeMem) / totalMem) * 100)));
+
+        const cpus = os.cpus();
+        let totalIdle = 0;
+        let totalTick = 0;
+        for (const cpu of cpus) {
+          for (const type in cpu.times) {
+            totalTick += cpu.times[type];
+          }
+          totalIdle += cpu.times.idle;
+        }
+        const cpuUsagePercent = totalTick > 0
+          ? Math.min(100, Math.max(1, Math.round((1 - (totalIdle / totalTick)) * 100)))
+          : 5;
+
+        res.json({
+          success: true,
+          data: {
+            cpu_usage_percent: cpuUsagePercent,
+            memory_usage_percent: memoryPercent,
+            uptime_seconds: Math.round(process.uptime()),
+            platform: os.platform(),
+            cpus_count: cpus.length
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching resource usage:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch resource usage' });
       }
-    });
-  } catch (error) {
-    console.error('Error fetching resource usage:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch resource usage' });
-  }
-};
+    };
 
-module.exports = {
-  getUsageStats,
-  getUsageEvents,
-  getTopEndpoints,
-  getResourceUsage,
-};
+    module.exports = {
+      getUsageStats,
+      getUsageEvents,
+      getTopEndpoints,
+      getResourceUsage,
+    };
