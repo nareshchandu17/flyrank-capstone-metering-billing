@@ -81,7 +81,22 @@ const getBaseUrl = () => {
           const response = await api.get('/admin/metrics');
           return response.data;
         } catch (err) {
-          if (err.response?.status === 403) {
+          const status = err.response?.status;
+          if (status === 403 || status === 401) {
+            if (!activeTenantId) {
+              return {
+                monthlyRevenue: '0.00',
+                totalRevenue: '0.00',
+                monthlyGrowth: 0,
+                activeTenants: 0,
+                totalTenants: 0,
+                totalEvents: 0,
+                avgUsage: 0,
+                totalApiCalls: 0,
+                totalAiTokens: 0,
+                billingStatus: { paid: 0, pending: 0, failed: 0 }
+              };
+            }
             try {
               const fallback = await api.get('/dashboard/stats');
               return fallback.data.data || fallback.data;
@@ -96,17 +111,12 @@ const getBaseUrl = () => {
       export const getRealTimeUsage = async () => {
         try {
           const response = await api.get('/admin/usage/realtime');
-          return response.data;
+          return response.data || [];
         } catch (err) {
-          if (err.response?.status === 403) {
-            try {
-              const fallback = await api.get('/usage/events');
-              return fallback.data.data || [];
-            } catch {
-              return [];
-            }
+          if (err.response?.status === 403 || err.response?.status === 401) {
+            return [];
           }
-          throw err;
+          return [];
         }
       };
 
@@ -125,7 +135,7 @@ const getBaseUrl = () => {
           const response = await api.get('/tenants');
           return response.data.tenants || response.data || [];
         } catch (err) {
-          if (err.response?.status === 403) {
+          if (err.response?.status === 403 || err.response?.status === 401) {
             try {
               const me = await getMe();
               return (me.memberships || []).map(m => ({
@@ -139,7 +149,7 @@ const getBaseUrl = () => {
               return [];
             }
           }
-          throw err;
+          return [];
         }
       };
 
@@ -240,8 +250,34 @@ const getBaseUrl = () => {
                   };
 
                   export const getUsageHistory = async (params = {}) => {
-                    const response = await api.get('/admin/usage/history', { params });
-                    return response.data;
+                    try {
+                      const response = await api.get('/admin/usage/history', { params });
+                      return response.data || [];
+                    } catch (err) {
+                      const status = err.response?.status;
+                      if (status === 403 || status === 401) {
+                        if (!activeTenantId) return [];
+                        try {
+                          const fallback = await api.get('/history/transactions', { params });
+                          return (fallback.data.data || fallback.data || []).map(item => ({
+                            id: item.id,
+                            tenant: item.tenant_name || item.tenant_id,
+                            metric: item.usage_type === 'api_call' ? 'API Calls' : 'AI Tokens',
+                            value: item.quantity,
+                            unit: item.usage_type === 'api_call' ? 'requests' : 'tokens',
+                            date: item.created_at ? new Date(item.created_at).toLocaleDateString() : '',
+                            time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+                            cost: (item.amount_cents ? (item.amount_cents / 100).toFixed(2) : '0.00'),
+                            cost_formatted: `$${(item.amount_cents ? (item.amount_cents / 100).toFixed(2) : '0.00')}`,
+                            usage_type: item.usage_type,
+                            metadata: item.metadata
+                          }));
+                        } catch {
+                          return [];
+                        }
+                      }
+                      return [];
+                    }
                   };
 
                   export const recordUsage = async (usageData) => {

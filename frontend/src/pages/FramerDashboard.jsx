@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { getMetrics, getRealTimeUsage, getTenants, getUsageHistory } from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   DollarSign,
   Users,
@@ -15,12 +16,15 @@ import {
   Clock,
   AlertTriangle,
   Terminal,
-  Plus
+  Plus,
+  Building2,
+  Sparkles
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const FramerDashboard = () => {
   const navigate = useNavigate();
+  const { activeTenant, permissions, isSyncing } = useAuth();
   const [metrics, setMetrics] = useState(null);
   const [realTimeUsage, setRealTimeUsage] = useState([]);
   const [topTenants, setTopTenants] = useState([]);
@@ -29,28 +33,33 @@ const FramerDashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchData = async (isManual = false) => {
+  const fetchData = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     else setLoading(true);
 
     try {
-      const [metricsData, usageData, tenantsData, historyData] = await Promise.all([
+      const [metricsRes, usageRes, tenantsRes, historyRes] = await Promise.allSettled([
         getMetrics(),
         getRealTimeUsage(),
         getTenants(),
         getUsageHistory({ limit: 6 })
       ]);
 
-      setMetrics(metricsData);
-      setRealTimeUsage(usageData || []);
+      const metricsData = metricsRes.status === 'fulfilled' ? metricsRes.value : null;
+      const usageData = usageRes.status === 'fulfilled' ? usageRes.value : [];
+      const tenantsData = tenantsRes.status === 'fulfilled' ? tenantsRes.value : [];
+      const historyData = historyRes.status === 'fulfilled' ? historyRes.value : [];
 
-      const sortedTenants = [...(tenantsData || [])]
+      setMetrics(metricsData);
+      setRealTimeUsage(Array.isArray(usageData) ? usageData : []);
+
+      const sortedTenants = [...(Array.isArray(tenantsData) ? tenantsData : [])]
         .sort((a, b) => (parseFloat(b.cost) || 0) - (parseFloat(a.cost) || 0))
         .slice(0, 5);
       setTopTenants(sortedTenants);
 
       setRecentActivity(
-        (historyData || []).slice(0, 5).map(item => ({
+        (Array.isArray(historyData) ? historyData : []).slice(0, 5).map(item => ({
           id: item.id,
           tenant: item.tenant,
           metric: item.metric,
@@ -74,16 +83,16 @@ const FramerDashboard = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
     const interval = setInterval(() => fetchData(false), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData, activeTenant?.tenant_id]);
 
-  /* ── Skeleton loader ── */
-  if (loading) {
+  /* ── Skeleton loader while loading or Auth0 context syncing ── */
+  if (loading || isSyncing) {
     const SkeletonBar = ({ w = 'w-full', h = 'h-4' }) => (
       <div className={`${w} ${h} rounded-lg bg-[#e3e8ee] animate-pulse`} />
     );
@@ -191,10 +200,41 @@ const FramerDashboard = () => {
     },
   ];
 
+  const isUnassigned = !activeTenant && !permissions.isPlatformAdmin;
+
   return (
     <div className="space-y-8">
-      {/* Non-blocking Notice Banner if unassigned or offline */}
-      {error && (
+      {/* Onboarding Callout when logged in user has no active tenant */}
+      {isUnassigned && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-gradient-to-r from-[#D4FF28]/15 via-white to-white border border-[#D4FF28]/50 rounded-2xl shadow-sm animate-in fade-in duration-200">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-[#D4FF28] text-[#0d253d] flex items-center justify-center shrink-0 shadow-sm font-semibold">
+              <Sparkles className="w-5 h-5 text-[#3F6212]" />
+            </div>
+            <div>
+              <div className="font-semibold text-sm text-[#0d253d] flex items-center gap-2">
+                <span>Welcome to FlyRank Metering Engine</span>
+                <span className="text-[10px] bg-[#D4FF28]/40 text-[#3F6212] px-2 py-0.5 rounded-full uppercase tracking-wider font-mono">
+                  Initial Setup
+                </span>
+              </div>
+              <p className="text-xs text-[#64748d] mt-0.5 leading-relaxed">
+                You do not have an active organization tenant assigned yet. Provision your first tenant to unlock scoped API keys, real-time token metering, and Stripe subscriptions.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/dashboard/tenants')}
+            className="btn-primary-pill text-xs py-2 px-4 shrink-0 inline-flex items-center gap-1.5 self-start sm:self-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Provision Tenant
+          </button>
+        </div>
+      )}
+
+      {/* Non-blocking Notice Banner if connection offline */}
+      {error === 'connection' && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-950 text-sm animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
@@ -202,12 +242,10 @@ const FramerDashboard = () => {
             </div>
             <div>
               <div className="font-semibold text-xs uppercase tracking-wider text-amber-800">
-                {error === 'auth' ? 'Tenant Context Not Selected' : 'Backend Telemetry Offline'}
+                Backend Telemetry Offline
               </div>
               <div className="text-xs text-amber-900 mt-0.5">
-                {error === 'auth'
-                  ? 'Your account is not assigned to a tenant yet. Showing zero-state telemetry. Provision a tenant below or switch tenant from the sidebar.'
-                  : 'Unable to reach backend service at port 3001. Ensure database and API server are running.'}
+                Unable to reach backend service at port 3001. Ensure database (port 5434) and API server are running.
               </div>
             </div>
           </div>
@@ -216,13 +254,7 @@ const FramerDashboard = () => {
               onClick={() => fetchData(true)}
               className="btn-secondary-pill text-xs py-1.5 px-3 bg-white"
             >
-              Retry
-            </button>
-            <button
-              onClick={() => navigate('/dashboard/tenants')}
-              className="btn-primary-pill text-xs py-1.5 px-3"
-            >
-              Provision Tenant
+              Retry Connection
             </button>
           </div>
         </div>
