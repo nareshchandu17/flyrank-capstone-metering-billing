@@ -241,19 +241,20 @@ class AdminController {
           costCents = calculateAITokenCost(row.metadata || { input_tokens: parseInt(row.value, 10) }, { exact: true });
         }
 
-        const dateObj = new Date(row.date);
+        const dateObj = row.date ? new Date(row.date) : new Date();
+        const isValidDate = !isNaN(dateObj.getTime());
         return {
           id: row.id,
           tenant: row.tenant,
           tenant_id: row.tenant_id,
           metric: row.metric === 'api_call' ? 'API Calls' : 'AI Tokens',
           usage_type: row.metric,
-          value: parseInt(row.value, 10),
+          value: parseInt(row.value, 10) || 0,
           unit: row.metric === 'api_call' ? 'calls' : 'tokens',
-          metadata: row.metadata,
+          metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}),
           idempotency_key: row.idempotency_key,
-          date: dateObj.toISOString().split('T')[0],
-          time: dateObj.toISOString().split('T')[1].substring(0, 8),
+          date: isValidDate ? dateObj.toISOString().split('T')[0] : '',
+          time: isValidDate ? dateObj.toISOString().split('T')[1].substring(0, 8) : '',
           timestamp: row.date,
           cost: (costCents / 100).toFixed(4),
           cost_formatted: `$${(costCents / 100).toFixed(2)}`

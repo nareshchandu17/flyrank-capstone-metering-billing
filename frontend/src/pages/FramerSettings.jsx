@@ -158,10 +158,10 @@ const FramerSettings = () => {
                       <Building2 className="w-3.5 h-3.5 text-[#4D7C0F]" /> Active Tenant &amp; Role
                     </div>
                     <div className="text-sm font-medium text-[#0d253d]">
-                      {activeTenant?.tenant_name || (permissions.isPlatformAdmin ? 'Platform Overview' : 'No Tenant Selected')}
+                      {activeTenant?.tenant_name || (permissions?.isPlatformAdmin ? 'Platform Overview' : 'No Tenant Selected')}
                     </div>
                     <div className="text-xs font-semibold text-[#3F6212] mt-0.5">
-                      Role: {currentRole || (permissions.isPlatformAdmin ? 'Platform Admin' : 'Viewer')}
+                      Role: {currentRole || (permissions?.isPlatformAdmin ? 'Platform Admin' : 'Viewer')}
                     </div>
                   </div>
                 </div>
@@ -172,7 +172,7 @@ const FramerSettings = () => {
               </div>
 
               {/* SECTION 2: STRIPE RECONCILIATION */}
-              {permissions.canManageBilling && (
+              {Boolean(permissions?.canManageBilling) && (
                 <div className="card-stripi p-6 bg-white space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-[#e3e8ee]">
                     <div className="flex items-center gap-3">
@@ -203,7 +203,7 @@ const FramerSettings = () => {
                       </label>
                       <input
                         type="text"
-                        value={settings.stripePricePro}
+                        value={settings?.stripePricePro || ''}
                         onChange={(e) => setSettings({ ...settings, stripePricePro: e.target.value })}
                         className="text-input-stripi w-full font-mono text-xs"
                       />
@@ -215,7 +215,7 @@ const FramerSettings = () => {
                           </label>
                           <input
                             type="text"
-                            value={settings.stripePriceFree}
+                            value={settings?.stripePriceFree || ''}
                             onChange={(e) => setSettings({ ...settings, stripePriceFree: e.target.value })}
                             className="text-input-stripi w-full font-mono text-xs"
                           />
@@ -230,7 +230,7 @@ const FramerSettings = () => {
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={settings.autoReconcile}
+                            checked={Boolean(settings?.autoReconcile)}
                             onChange={(e) => setSettings({ ...settings, autoReconcile: e.target.checked })}
                             className="sr-only peer"
                           />
@@ -263,12 +263,12 @@ const FramerSettings = () => {
                               min="50"
                               max="95"
                               step="5"
-                              value={settings.alertThresholdPercent}
+                              value={settings?.alertThresholdPercent ?? 80}
                               onChange={(e) => setSettings({ ...settings, alertThresholdPercent: Number(e.target.value) })}
                               className="w-full accent-[#BEF218]"
                             />
                             <span className="font-mono text-xs font-semibold text-[#0d253d] w-12 text-right">
-                              {settings.alertThresholdPercent}%
+                              {settings?.alertThresholdPercent ?? 80}%
                             </span>
                           </div>
                           <p className="text-[11px] text-[#64748d] mt-1">Dispatches notification webhook and email warning.</p>
@@ -284,12 +284,12 @@ const FramerSettings = () => {
                                 min="95"
                                 max="120"
                                 step="5"
-                                value={settings.criticalThresholdPercent}
+                                value={settings?.criticalThresholdPercent ?? 100}
                                 onChange={(e) => setSettings({ ...settings, criticalThresholdPercent: Number(e.target.value) })}
                                 className="w-full accent-[#ea2261]"
                               />
                               <span className="font-mono text-xs font-semibold text-[#0d253d] w-12 text-right">
-                                {settings.criticalThresholdPercent}%
+                                {settings?.criticalThresholdPercent ?? 100}%
                               </span>
                             </div>
                             <p className="text-[11px] text-[#64748d] mt-1">Hard blocks incoming requests on Free tier without overage permission.</p>
@@ -313,7 +313,7 @@ const FramerSettings = () => {
                         <div>
                           <label className="block text-xs font-medium text-[#273951] mb-1">Billing Currency</label>
                           <select
-                            value={settings.currency}
+                            value={settings?.currency || 'USD'}
                             onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
                             className="text-input-stripi w-full"
                           >
@@ -331,7 +331,7 @@ const FramerSettings = () => {
                           type="number"
                           min="5"
                           max="300"
-                          value={settings.pollIntervalSeconds}
+                          value={settings?.pollIntervalSeconds ?? 30}
                           onChange={(e) => setSettings({ ...settings, pollIntervalSeconds: Number(e.target.value) })}
                           className="text-input-stripi w-full"
                         />

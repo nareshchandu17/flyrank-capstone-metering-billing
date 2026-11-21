@@ -319,8 +319,8 @@ const FramerHistory = () => {
             className="text-input-stripi py-1.5 px-3 text-xs"
           >
             <option value="all">All Tenants</option>
-            {tenants.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+            {(Array.isArray(tenants) ? tenants : []).map(t => (
+              <option key={t?.id || Math.random()} value={t?.id}>{t?.name || t?.tenant_name || 'Tenant'}</option>
             ))}
           </select>
 
@@ -395,7 +395,7 @@ const FramerHistory = () => {
                           </p>
                           {invoices.length === 0 ? (
                             <button
-                              onClick={() => setIsGenerateModalOpen(true)}
+                              onClick={() => setIsGenerateOpen(true)}
                               className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
                             >
                               <Plus className="w-3.5 h-3.5" />
@@ -533,7 +533,7 @@ const FramerHistory = () => {
                       <span className="text-xs text-[#64748d] tnum">Period: {selectedInvoice.billing_period}</span>
                     </div>
                     <h2 className="font-display-md text-[#0d253d] mt-1">
-                      Invoice #{selectedInvoice.id?.substring(0, 8)}
+                      Invoice #{String(selectedInvoice?.id || '').substring(0, 8)}
                     </h2>
                   </div>
                   <button
@@ -550,7 +550,7 @@ const FramerHistory = () => {
                     <div>
                       <div className="text-[11px] text-[#64748d] uppercase font-semibold">Total Amount</div>
                       <div className="text-lg font-light text-[#0d253d] tnum">
-                        ${(selectedInvoice.amount_cents / 100).toFixed(2)}
+                        ${((Number(selectedInvoice?.amount_cents) || 0) / 100).toFixed(2)}
                       </div>
                     </div>
                     <div>
@@ -611,7 +611,7 @@ const FramerHistory = () => {
                             <td className="py-3 px-4 text-[#0d253d]">Total Settlement</td>
                             <td className="py-3 px-4"></td>
                             <td className="py-3 px-4 text-right font-body-tabular text-sm font-semibold text-[#0d253d] tnum">
-                              ${(selectedInvoice.amount_cents / 100).toFixed(2)}
+                              ${((Number(selectedInvoice?.amount_cents) || 0) / 100).toFixed(2)}
                             </td>
                           </tr>
                         </tfoot>
@@ -684,8 +684,8 @@ const FramerHistory = () => {
                       required
                       className="text-input-stripi w-full"
                     >
-                      {tenants.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} ({t.plan} Plan)</option>
+                      {(Array.isArray(tenants) ? tenants : []).map(t => (
+                        <option key={t?.id || Math.random()} value={t?.id}>{t?.name || t?.tenant_name || 'Tenant'} ({t?.plan || 'Free'} Plan)</option>
                       ))}
                     </select>
                   </div>

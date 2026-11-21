@@ -251,7 +251,7 @@ const FramerLayout = () => {
       </aside>
 
       {/* Main Top Header Floating over Mesh */}
-      <header className={`sticky top - 0 z - 30 transition - all duration - 300 ${isCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
+      <header className={`sticky top-0 z-30 transition-all duration-300 ${isCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <div className="mx-auto px-6 py-4 flex items-center justify-between bg-white/70 backdrop-blur-xl border-b border-[#e3e8ee]/80 shadow-[0_1px_2px_rgba(0,55,112,0.02)]">
           {/* Breadcrumb & Title */}
           <div className="flex items-center gap-3">
@@ -312,7 +312,7 @@ const FramerLayout = () => {
                     navigate(item.path);
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w - full flex items - center gap - 3 px - 4 py - 3 rounded - xl text - sm transition - all duration - 150 ${active
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all duration-150 ${active
                       ? 'bg-[#D4FF28] text-[#0d253d] font-semibold border border-[#C4EF1E]'
                       : 'text-[#273951] hover:bg-[#f6f9fc]'
                     }`}

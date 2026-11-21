@@ -403,23 +403,30 @@ const getBaseUrl = () => {
                         };
 
                         // Client Settings (theme, alert preferences) - completely removed hardcoded admin credentials
-                        export const getSettings = () => {
-                          const saved = localStorage.getItem('usage_metering_settings');
-                          if (saved) {
-                            try {
-                              return JSON.parse(saved);
-                            } catch {
-                              // Fallback
-                            }
-                          }
-                          return {
-                            alertThresholdPercent: 80,
-                            stripeLiveMode: false,
-                            autoReconcile: true,
-                            currency: 'USD',
-                            webhookNotifications: true
-                          };
-                        };
+export const getSettings = () => {
+  const defaults = {
+    alertThresholdPercent: 80,
+    criticalThresholdPercent: 100,
+    stripePricePro: '',
+    stripePriceFree: '',
+    autoReconcile: true,
+    currency: 'USD',
+    pollIntervalSeconds: 30,
+    webhookNotifications: true
+  };
+
+  try {
+    const saved = localStorage.getItem('usage_metering_settings');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...defaults, ...parsed };
+    }
+  } catch {
+    // Fallback on defaults if JSON parsing fails
+  }
+
+  return defaults;
+};
 
                         export const saveSettings = (newSettings) => {
                           localStorage.setItem('usage_metering_settings', JSON.stringify(newSettings));
