@@ -75,26 +75,36 @@ const FramerUsage = () => {
     fetchData();
   }, []);
 
-  // Filter events
-  const filteredEvents = events.filter(event => {
+  // Filter events safely with null-checks
+  const filteredEvents = (Array.isArray(events) ? events : []).filter(event => {
+    if (!event) return false;
+    const metricStr = String(event.metric || event.usage_type || '').toLowerCase();
+    const isApi = event.usage_type === 'api_call' || metricStr.includes('api');
+    const isAi = event.usage_type === 'ai_tokens' || metricStr.includes('token');
+
     const matchesTenant = selectedTenant === 'all' || event.tenant_id === selectedTenant || event.tenant === selectedTenant;
-    const matchesMetric = selectedMetric === 'all' || event.usage_type === selectedMetric || (selectedMetric === 'api_call' && event.metric.includes('API')) || (selectedMetric === 'ai_tokens' && event.metric.includes('Token'));
+    const matchesMetric =
+      selectedMetric === 'all' ||
+      event.usage_type === selectedMetric ||
+      (selectedMetric === 'api_call' && isApi) ||
+      (selectedMetric === 'ai_tokens' && isAi);
+
     const matchesSearch =
-      (event.tenant || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (event.idempotency_key || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (event.metric || '').toLowerCase().includes(searchQuery.toLowerCase());
+      String(event.tenant || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(event.idempotency_key || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(event.metric || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     return matchesTenant && matchesMetric && matchesSearch;
   });
 
-  // Aggregated breakdowns from real events
+  // Aggregated breakdowns from real events safely
   const totalCalls = filteredEvents
-    .filter(e => e.usage_type === 'api_call' || e.metric.includes('API'))
-    .reduce((sum, e) => sum + (e.value || 0), 0);
+    .filter(e => e.usage_type === 'api_call' || String(e.metric || '').toLowerCase().includes('api'))
+    .reduce((sum, e) => sum + (Number(e.value) || 0), 0);
 
   const totalTokens = filteredEvents
-    .filter(e => e.usage_type === 'ai_tokens' || e.metric.includes('Token'))
-    .reduce((sum, e) => sum + (e.value || 0), 0);
+    .filter(e => e.usage_type === 'ai_tokens' || String(e.metric || '').toLowerCase().includes('token'))
+    .reduce((sum, e) => sum + (Number(e.value) || 0), 0);
 
   const totalCalculatedCost = filteredEvents
     .reduce((sum, e) => sum + (parseFloat(e.cost) || 0), 0);
@@ -332,8 +342,8 @@ const FramerUsage = () => {
               ))
               ) : filteredEvents.length > 0 ? (
                 filteredEvents.map((event) => {
-                  const isApi = event.usage_type === 'api_call' || event.metric.includes('API');
-              const meta = event.metadata;
+                  const isApi = event.usage_type === 'api_call' || String(event.metric || '').toLowerCase().includes('api');
+                  const meta = event.metadata;
               return (
               <tr key={event.id} className="hover:bg-[#f6f9fc] transition-colors">
                 {/* Timestamp */}

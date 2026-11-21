@@ -19,6 +19,7 @@ import {
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import BackgroundAnimation from './BackgroundAnimation';
+import ErrorBoundary from './ErrorBoundary';
 
 const FramerLayout = () => {
   const location = useLocation();
@@ -28,12 +29,12 @@ const FramerLayout = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isTenantDropdownOpen, setIsTenantDropdownOpen] = useState(false);
 
-  // Dynamic navigation items based on database permissions
+  // Dynamic navigation items - all standard sections available with contextual capabilities
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Overview', visible: true },
-    { path: '/dashboard/tenants', icon: Users, label: 'Tenants & Members', visible: permissions.canManageTenants || permissions.canManageMembers },
-    { path: '/dashboard/usage', icon: BarChart3, label: 'Usage & Events', visible: permissions.canViewUsage },
-    { path: '/dashboard/history', icon: History, label: 'Billing & Invoices', visible: permissions.canViewInvoices },
+    { path: '/dashboard/tenants', icon: Users, label: 'Tenants & Members', visible: true },
+    { path: '/dashboard/usage', icon: BarChart3, label: 'Usage & Events', visible: true },
+    { path: '/dashboard/history', icon: History, label: 'Billing & Invoices', visible: true },
     { path: '/dashboard/settings', icon: Settings, label: 'Settings', visible: true },
   ].filter(item => item.visible);
 
@@ -201,7 +202,7 @@ const FramerLayout = () => {
                             } ${isCollapsed ? 'justify-center px-0' : ''}`}
                           title={isCollapsed ? item.label : undefined}
                         >
-                          <Icon className={`w - 4 h - 4 shrink - 0 ${active ? 'text-[#0d253d]' : 'text-[#64748d]'}`} />
+                          <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-[#0d253d]' : 'text-[#64748d]'}`} />
                           {!isCollapsed && <span>{item.label}</span>}
                         </button>
                       );
@@ -334,15 +335,17 @@ const FramerLayout = () => {
         )}
       </AnimatePresence>
 
-      {/* Main Outlet Area */}
-      <main className={`relative z - 10 transition - all duration - 300 ${isCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
+      {/* Main Outlet Area protected by ErrorBoundary */}
+      <main className={`relative z-10 transition-all duration-300 ${isCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
 
       {/* Minimalist Light Footer */}
-      <footer className={`relative z - 10 py - 10 px - 8 border - t border - [#e3e8ee] bg - white transition - all duration - 300 ${isCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
+      <footer className={`relative z-10 py-10 px-8 border-t border-[#e3e8ee] bg-white transition-all duration-300 ${isCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#64748d]">
           <div className="flex items-center gap-2">
             <span className="font-medium text-[#0d253d]">UsageMeter Engine</span>

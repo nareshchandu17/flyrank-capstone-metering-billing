@@ -330,10 +330,15 @@ const getBaseUrl = () => {
                   // 7. INVOICING & BILLING
                   // ==========================================
                     export const getInvoices = async (tenantId) => {
-                      const response = await api.get('/history/invoices', {
-                        headers: tenantId ? { 'X-Tenant-ID': tenantId } : {}
-                      });
-                      return response.data.data || response.data;
+                      try {
+                        const target = tenantId || activeTenantId;
+                        const response = await api.get('/history/invoices', {
+                          headers: target ? { 'X-Tenant-ID': target } : {}
+                        });
+                        return response.data.data || response.data || [];
+                      } catch (err) {
+                        return [];
+                      }
                     };
 
                       export const getInvoiceDetail = async (id) => {

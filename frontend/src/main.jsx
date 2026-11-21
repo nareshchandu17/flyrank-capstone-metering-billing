@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Auth0Provider } from '@auth0/auth0-react';
 import './index.css';
 import App from './App.jsx';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN;
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
@@ -25,18 +26,20 @@ const onRedirectCallback = (appState) => {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <Auth0Provider
-      domain={domain}
-      clientId={clientId}
-      authorizationParams={{
-        redirect_uri: window.location.origin,
-        audience: audience
-      }}
-      cacheLocation="memory"
-      useRefreshTokens={true}
-      onRedirectCallback={onRedirectCallback}
-    >
-      <App />
-    </Auth0Provider>
+    <ErrorBoundary>
+      <Auth0Provider
+        domain={domain}
+        clientId={clientId}
+        authorizationParams={{
+          redirect_uri: window.location.origin,
+          audience: audience
+        }}
+        cacheLocation="localstorage"
+        useRefreshTokens={true}
+        onRedirectCallback={onRedirectCallback}
+      >
+        <App />
+      </Auth0Provider>
+    </ErrorBoundary>
   </StrictMode>,
 );

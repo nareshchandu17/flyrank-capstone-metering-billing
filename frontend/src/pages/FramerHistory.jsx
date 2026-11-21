@@ -144,13 +144,15 @@ const FramerHistory = () => {
     }
   };
 
-  // Filter invoices
-  const filteredInvoices = invoices.filter(inv => {
+  // Filter invoices safely
+  const filteredInvoices = (Array.isArray(invoices) ? invoices : []).filter(inv => {
+    if (!inv) return false;
+    const query = String(searchTerm || '').toLowerCase();
     const matchesSearch =
-      (inv.tenant_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inv.billing_period || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inv.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inv.stripe_invoice_id || '').toLowerCase().includes(searchTerm.toLowerCase());
+      String(inv.tenant_name || '').toLowerCase().includes(query) ||
+      String(inv.billing_period || '').toLowerCase().includes(query) ||
+      String(inv.id || '').toLowerCase().includes(query) ||
+      String(inv.stripe_invoice_id || '').toLowerCase().includes(query);
 
     const matchesStatus = statusFilter === 'all' || inv.status === statusFilter;
     const matchesTenant = selectedTenantFilter === 'all' || inv.tenant_id === selectedTenantFilter;
@@ -158,8 +160,8 @@ const FramerHistory = () => {
     return matchesSearch && matchesStatus && matchesTenant;
   });
 
-  // Calculate totals
-  const totalBilledCents = filteredInvoices.reduce((sum, inv) => sum + (inv.amount_cents || 0), 0);
+  // Calculate totals safely
+  const totalBilledCents = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.amount_cents) || 0), 0);
   const paidCount = filteredInvoices.filter(i => i.status === 'paid').length;
   const pendingCount = filteredInvoices.filter(i => i.status === 'pending' || i.status === 'open').length;
 
@@ -414,49 +416,49 @@ const FramerHistory = () => {
                         </div>
                       </td>
                     </tr>
-                    ) : (
+                    ) : filteredInvoices.length > 0 ? (
                   filteredInvoices.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-[#f6f9fc] transition-colors">
+                    <tr key={inv?.id || Math.random()} className="hover:bg-[#f6f9fc] transition-colors">
                       <td className="py-3.5 px-5">
                         <div className="flex items-center gap-2">
                           <Calendar className="w-3.5 h-3.5 text-[#4D7C0F]" />
-                          <span className="font-body-tabular text-sm font-medium text-[#0d253d] tnum">{inv.billing_period}</span>
+                          <span className="font-body-tabular text-sm font-medium text-[#0d253d] tnum">{inv?.billing_period || 'N/A'}</span>
                         </div>
                       </td>
 
                       <td className="py-3.5 px-5">
                         <div className="text-sm font-medium text-[#0d253d]">
-                          {inv.tenant_name || (tenants.find(t => t.id === inv.tenant_id)?.name || 'Unknown')}
+                          {inv?.tenant_name || ((Array.isArray(tenants) ? tenants : []).find(t => t?.id === inv?.tenant_id)?.name || 'Tenant Ledger')}
                         </div>
-                        <div className="text-[10px] text-[#64748d] font-mono tnum">ID: {inv.id.substring(0, 8)}...</div>
+                        <div className="text-[10px] text-[#64748d] font-mono tnum">ID: {String(inv?.id || '').substring(0, 8)}...</div>
                       </td>
 
                       <td className="py-3.5 px-5 text-right font-body-tabular text-sm font-medium text-[#0d253d] tnum">
-                        ${(inv.amount_cents / 100).toFixed(2)}
+                        ${((Number(inv?.amount_cents) || 0) / 100).toFixed(2)}
                       </td>
 
                       <td className="py-3.5 px-5">
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-pill text-[11px] font-medium border ${inv.status === 'paid'
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${inv?.status === 'paid'
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : inv.status === 'payment_failed'
+                          : inv?.status === 'payment_failed'
                             ? 'bg-red-50 text-[#ea2261] border-red-200'
                             : 'bg-[#f5e9d4] text-[#9b6829] border-[#9b6829]/20'
                           }`}>
-                          {inv.status === 'paid' ? (
+                          {inv?.status === 'paid' ? (
                             <CheckCircle className="w-3 h-3 text-emerald-600" />
-                          ) : inv.status === 'payment_failed' ? (
+                          ) : inv?.status === 'payment_failed' ? (
                             <XCircle className="w-3 h-3 text-[#ea2261]" />
                           ) : (
                             <Clock className="w-3 h-3 text-[#9b6829]" />
                           )}
-                          <span className="capitalize">{inv.status}</span>
+                          <span className="capitalize">{inv?.status || 'draft'}</span>
                         </span>
                       </td>
 
                       <td className="py-3.5 px-5">
-                        {inv.stripe_invoice_id ? (
+                        {inv?.stripe_invoice_id ? (
                           <div className="text-xs text-[#3F6212] font-mono tnum">
-                            {inv.stripe_invoice_id.substring(0, 16)}...
+                            {String(inv.stripe_invoice_id).substring(0, 16)}...
                           </div>
                         ) : (
                           <span className="text-[11px] text-[#64748d]">Local Ledger Only</span>
@@ -474,6 +476,40 @@ const FramerHistory = () => {
                       </td>
                     </tr>
                     ))
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="py-16 text-center">
+                      <div className="max-w-sm mx-auto text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-[#f6f9fc] border border-[#e3e8ee] text-slate-400 flex items-center justify-center mx-auto mb-3 shadow-sm">
+                          <Receipt className="w-6 h-6 text-[#4D7C0F]" />
+                        </div>
+                        <h3 className="text-sm font-semibold text-[#0d253d] mb-1">
+                          {searchTerm ? `No invoices match "${searchTerm}"` : 'No Invoices Generated Yet'}
+                        </h3>
+                        <p className="text-xs text-[#64748d] mb-4 leading-relaxed">
+                          {searchTerm
+                            ? 'Try clearing your search query or adjusting tenant filters.'
+                            : 'Monthly billing periods settle accumulated micro-cent usage into immutable ledger invoices.'}
+                        </p>
+                        {searchTerm ? (
+                          <button
+                            onClick={() => setSearchTerm('')}
+                            className="btn-secondary-pill text-xs py-1.5 px-3"
+                          >
+                            Clear Search
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setIsGenerateOpen(true)}
+                            className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Generate Invoice
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
                 )}
                   </tbody>
                 </table>

@@ -244,13 +244,15 @@ const FramerTenants = () => {
     setTimeout(() => setCopiedKey(false), 2500);
   };
 
-  // Filter tenants
-  const filteredTenants = tenants.filter(t => {
-    const matchesSearch =
-      t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (t.id && t.id.toLowerCase().includes(searchTerm.toLowerCase()));
+  // Filter tenants safely with null-checks
+  const filteredTenants = (Array.isArray(tenants) ? tenants : []).filter(t => {
+    if (!t) return false;
+    const nameStr = String(t.name || t.tenant_name || '').toLowerCase();
+    const emailStr = String(t.email || t.billing_email || '').toLowerCase();
+    const idStr = String(t.id || t.tenant_id || '').toLowerCase();
+    const query = String(searchTerm || '').toLowerCase();
 
+    const matchesSearch = nameStr.includes(query) || emailStr.includes(query) || idStr.includes(query);
     const matchesStatus = statusFilter === 'all' || (t.status || 'active') === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -382,23 +384,26 @@ const FramerTenants = () => {
                   ) : filteredTenants.length > 0 ? (
                     filteredTenants.map((tenant) => {
                       const status = tenant.status || 'active';
+                      const tenantName = tenant.name || tenant.tenant_name || 'Tenant';
+                      const tenantEmail = tenant.email || tenant.billing_email || 'No email attached';
+                      const tenantId = tenant.id || tenant.tenant_id || '';
               return (
-              <tr key={tenant.id} className="hover:bg-[#f6f9fc] transition-colors">
+              <tr key={tenantId || Math.random()} className="hover:bg-[#f6f9fc] transition-colors">
                 <td className="py-4 px-6">
                   <div
                     onClick={() => handleInspect(tenant)}
                     className="cursor-pointer group flex items-center gap-3"
                   >
                     <div className="w-8 h-8 rounded-lg bg-[#D4FF28]/25 text-[#3F6212] font-semibold flex items-center justify-center text-xs shrink-0 border border-[#C4EF1E]/40">
-                      {tenant.name.charAt(0).toUpperCase()}
+                      {tenantName.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <div className="font-normal text-[#0d253d] group-hover:text-[#3F6212] transition-colors flex items-center gap-1.5">
-                        <span>{tenant.name}</span>
+                        <span>{tenantName}</span>
                         <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                      <div className="text-xs text-[#64748d]">{tenant.email}</div>
-                      <div className="text-[11px] text-[#61718a] font-mono tnum mt-0.5">{tenant.id}</div>
+                      <div className="text-xs text-[#64748d]">{tenantEmail}</div>
+                      <div className="text-[11px] text-[#61718a] font-mono tnum mt-0.5">{tenantId}</div>
                     </div>
                   </div>
                 </td>
@@ -479,7 +484,7 @@ const FramerTenants = () => {
                         </button>
                       ) : (
                         <button
-                          onClick={() => setIsModalOpen(true)}
+                          onClick={() => setIsCreateOpen(true)}
                           className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
                         >
                           <Plus className="w-3.5 h-3.5" />
