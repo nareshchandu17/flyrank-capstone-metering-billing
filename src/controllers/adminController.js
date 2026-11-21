@@ -18,21 +18,21 @@ class AdminController {
         ORDER BY t.created_at DESC
       `;
       const result = await pool.query(query);
-      
+
       const tenants = result.rows;
-      
+
       // Calculate current month usage & cost for each tenant
       for (let i = 0; i < tenants.length; i++) {
         try {
           const summary = await meterService.getUsageSummary(tenants[i].id);
-          tenants[i].usage = summary.usage.api_calls.used + summary.usage.ai_tokens.used; 
+          tenants[i].usage = summary.usage.api_calls.used + summary.usage.ai_tokens.used;
           tenants[i].cost = summary.costs.total_dollars;
         } catch (e) {
           tenants[i].usage = 0;
           tenants[i].cost = 0;
         }
       }
-      
+
       res.status(200).json(tenants);
     } catch (error) {
       console.error('Error fetching tenants:', error);
@@ -47,27 +47,27 @@ class AdminController {
   async createTenant(req, res) {
     try {
       const { name, email, plan = 'Free' } = req.body;
-      
+
       if (!name || !email) {
         return res.status(400).json({ error: 'Name and email are required' });
       }
-      
+
       const planResult = await pool.query('SELECT id FROM plans WHERE name = $1', [plan]);
       if (planResult.rows.length === 0) {
         return res.status(400).json({ error: 'Invalid plan' });
       }
       const planId = planResult.rows[0].id;
-      
+
       const result = await pool.query(
         'INSERT INTO tenants (name, email, plan_id) VALUES ($1, $2, $3) RETURNING id, name, email, status',
         [name, email, planId]
       );
-      
+
       const newTenant = result.rows[0];
       newTenant.plan = plan;
       newTenant.usage = 0;
       newTenant.cost = 0;
-      
+
       res.status(201).json(newTenant);
     } catch (error) {
       console.error('Error creating tenant:', error);
@@ -101,16 +101,16 @@ class AdminController {
     try {
       const { id } = req.params;
       const { name, email, status } = req.body;
-      
+
       const result = await pool.query(
         'UPDATE tenants SET name = COALESCE($1, name), email = COALESCE($2, email), status = COALESCE($3, status) WHERE id = $4 RETURNING id, name, email, status',
         [name, email, status, id]
       );
-      
+
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Tenant not found' });
       }
-      
+
       res.status(200).json(result.rows[0]);
     } catch (error) {
       console.error('Error updating tenant:', error);
@@ -125,7 +125,7 @@ class AdminController {
   async getMetrics(req, res) {
     try {
       const currentMonth = new Date().toISOString().substring(0, 7);
-      
+
       const tenantsStats = await pool.query(`
         SELECT 
           COUNT(*) as total_tenants,
@@ -300,7 +300,7 @@ class AdminController {
       // If recent events are few, construct full standard 6-slot timeline with real values
       const intervals = ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'];
       const resultMap = new Map(result.rows.map(r => [r.time, parseInt(r.value, 10)]));
-      
+
       const realTimeData = intervals.map(time => ({
         time,
         value: resultMap.get(time) || 0
