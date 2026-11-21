@@ -252,6 +252,29 @@ class StripeController {
       res.status(500).json({ error: 'Failed to fetch webhook events' });
     }
   }
+
+  /**
+   * Create customer billing portal session
+   * POST /api/stripe/portal
+   */
+  async createCustomerPortalSession(req, res) {
+    try {
+      const targetTenantId = req.isPlatformAdmin ? (req.body.tenant_id || req.tenantId) : req.tenantId;
+      const { return_url } = req.body;
+
+      if (!targetTenantId) {
+        return res.status(400).json({ error: 'Tenant context is required' });
+      }
+
+      const session = await stripeService.createCustomerPortalSession(targetTenantId, return_url);
+      res.status(200).json(session);
+    } catch (error) {
+      console.error('Error creating Stripe portal session:', error.message);
+      res.status(error.statusCode || 500).json({
+        error: error.message || 'Internal server error'
+      });
+    }
+  }
 }
 
 module.exports = new StripeController();

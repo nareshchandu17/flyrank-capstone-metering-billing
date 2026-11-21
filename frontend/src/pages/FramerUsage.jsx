@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getUsageHistory, getTenants, exportUsageToCsv, recordUsage } from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Download,
   Search,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 
 const FramerUsage = () => {
+  const { permissions } = useAuth();
   const [events, setEvents] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -199,13 +201,16 @@ const FramerUsage = () => {
             <span>Export CSV</span>
           </button>
 
-          <button
-            onClick={() => setIsSimulateOpen(true)}
-            className="btn-primary-pill"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Ingest Event</span>
-          </button>
+          {permissions?.isPlatformAdmin && (
+            <button
+              onClick={() => setIsSimulateOpen(true)}
+              className="btn-primary-pill"
+              title="Test Simulator (Platform Admin Only)"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Simulate Event</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -265,18 +270,18 @@ const FramerUsage = () => {
             onChange={(e) => setSelectedTenant(e.target.value)}
             className="text-input-stripi text-xs py-1.5"
           >
-            <option value="all">All Accounts ({(Array.isArray(tenants) ? tenants : []).length})</option>
-            {(Array.isArray(tenants) ? tenants : []).map((t) => (
-              <option key={t?.id || Math.random()} value={t?.id}>
-                {t?.name || t?.tenant_name || 'Tenant'}
-              </option>
-            ))}
-          </select>
+                <option value="all">All Accounts ({(Array.isArray(tenants) ? tenants : []).length})</option>
+                {(Array.isArray(tenants) ? tenants : []).map((t) => (
+                  <option key={t?.id || Math.random()} value={t?.id}>
+                    {t?.name || t?.tenant_name || 'Tenant'}
+                  </option>
+                ))}
+              </select>
 
-          {/* Metric Selector */}
-          <select
-            value={selectedMetric}
-            onChange={(e) => setSelectedMetric(e.target.value)}
+          {/* Metric Selector */ }
+              < select
+            value = { selectedMetric }
+            onChange = {(e) => setSelectedMetric(e.target.value)}
             className="text-input-stripi text-xs py-1.5"
           >
             <option value="all">All Metrics</option>
@@ -313,135 +318,135 @@ const FramerUsage = () => {
             <tbody className="divide-y divide-[#e3e8ee]">
               {loading ? (
                 [...Array(5)].map((_, idx) => (
-              <tr key={`usage-skel-${idx}`} className="animate-pulse">
-                <td className="py-3.5 px-6">
-                  <div className="space-y-1">
-                    <div className="h-3 bg-[#e3e8ee] rounded w-20" />
-                    <div className="h-2.5 bg-[#e3e8ee] rounded w-14" />
-                  </div>
-                </td>
-                <td className="py-3.5 px-6">
-                  <div className="space-y-1">
-                    <div className="h-3.5 bg-[#e3e8ee] rounded w-24" />
-                    <div className="h-2.5 bg-[#e3e8ee] rounded w-32" />
-                  </div>
-                </td>
-                <td className="py-3.5 px-6">
-                  <div className="h-5 bg-[#e3e8ee] rounded-full w-20" />
-                </td>
-                <td className="py-3.5 px-6">
-                  <div className="h-4 bg-[#e3e8ee] rounded w-44" />
-                </td>
-                <td className="py-3.5 px-6 text-right">
-                  <div className="h-4 bg-[#e3e8ee] rounded w-16 ml-auto" />
-                </td>
-                <td className="py-3.5 px-6 text-right">
-                  <div className="h-4 bg-[#e3e8ee] rounded w-14 ml-auto" />
-                </td>
-              </tr>
-              ))
-              ) : filteredEvents.length > 0 ? (
-                filteredEvents.map((event, idx) => {
-                  const isApi = event?.usage_type === 'api_call' || String(event?.metric || '').toLowerCase().includes('api');
-                  let meta = event?.metadata;
-                  if (typeof meta === 'string') {
-                    try {
-                      meta = JSON.parse(meta);
-                    } catch {
-                      meta = null;
-                    }
-                  }
-              return (
-              <tr key={event?.id || idx} className="hover:bg-[#f6f9fc] transition-colors">
-                {/* Timestamp */}
-                <td className="py-3.5 px-6 font-mono text-xs text-[#64748d] tnum">
-                  <div>{event?.date || 'N/A'}</div>
-                  <div className="text-[10px] text-[#61718a]">{event?.time || ''}</div>
-                </td>
-
-                {/* Tenant Account */}
-                <td className="py-3.5 px-6">
-                  <div className="font-normal text-[#0d253d]">{event?.tenant || event?.tenant_name || 'Tenant Account'}</div>
-                  <div className="text-[11px] text-[#64748d] font-mono tnum truncate max-w-[160px]">
-                    {event?.idempotency_key || event?.tenant_id || ''}
-                  </div>
-                </td>
-
-                {/* Metric Badge */}
-                <td className="py-3.5 px-6">
-                  <span className="pill-tag-soft">
-                    {event?.metric || (isApi ? 'API Calls' : 'AI Tokens')}
-                  </span>
-                </td>
-
-                {/* Detailed Token Categorization */}
-                <td className="py-3.5 px-6 text-xs text-[#64748d]">
-                  {!isApi && meta ? (
-                    <div className="flex flex-wrap gap-2 text-[11px] font-mono tnum">
-                      <span className="text-[#0d253d]" title="Input tokens">In: {(Number(meta.input_tokens) || 0).toLocaleString()}</span>
-                      <span className="text-[#64748d]" title="Cached input tokens">Cached: {(Number(meta.cached_input_tokens || meta.cached_tokens) || 0).toLocaleString()}</span>
-                      <span className="text-[#3F6212] font-semibold" title="Output tokens">Out: {(Number(meta.output_tokens) || 0).toLocaleString()}</span>
-                      {meta.reasoning_tokens ? (
-                        <span className="text-[#ea2261]" title="Reasoning tokens">Reason: {(Number(meta.reasoning_tokens) || 0).toLocaleString()}</span>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <span className="text-[#64748d] text-xs font-mono">Standard HTTP API Request</span>
-                  )}
-                </td>
-
-                {/* Units */}
-                <td className="py-3.5 px-6 text-right font-mono tnum text-[#0d253d]">
-                  {(Number(event?.value) || 0).toLocaleString()}
-                </td>
-
-                {/* Cost */}
-                <td className="py-3.5 px-6 text-right font-medium text-[#0d253d] font-mono tnum">
-                  {event?.cost_formatted || `$${(Number(event?.cost) || 0).toFixed(4)}`}
-                </td>
-              </tr>
-              );
-                })
-              ) : (
-              <tr>
-                  <td colSpan="6" className="py-16 text-center">
-                    <div className="max-w-sm mx-auto text-center">
-                      <div className="w-12 h-12 rounded-2xl bg-[#f6f9fc] border border-[#e3e8ee] text-slate-400 flex items-center justify-center mx-auto mb-3 shadow-sm">
-                        <Activity className="w-6 h-6 text-[#4D7C0F]" />
+                  <tr key={`usage-skel-${idx}`} className="animate-pulse">
+                    <td className="py-3.5 px-6">
+                      <div className="space-y-1">
+                        <div className="h-3 bg-[#e3e8ee] rounded w-20" />
+                        <div className="h-2.5 bg-[#e3e8ee] rounded w-14" />
                       </div>
-                      <h3 className="text-sm font-semibold text-[#0d253d] mb-1">
-                        {events.length === 0 ? 'No Usage Events Recorded Yet' : 'No Events Match Current Filters'}
-                      </h3>
-                      <p className="text-xs text-[#64748d] mb-4 leading-relaxed">
-                        {events.length === 0
-                          ? 'Real-time micro-metered telemetry will populate here as applications send billable API requests or AI token events.'
-                          : 'Try adjusting your metric filter, tenant scope, or search terms.'}
-                      </p>
-                      {events.length === 0 ? (
-                        <button
-                          onClick={() => setIsSimulateOpen(true)}
-                          className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Simulate Test Event
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setSelectedTenant('all');
-                            setSelectedMetric('all');
-                            setSearchQuery('');
-                          }}
-                          className="btn-secondary-pill text-xs py-1.5 px-3"
-                        >
-                          Reset Filters
-                        </button>
-                      )}
-                    </div>
-                  </td>
-              </tr>
+                    </td>
+                    <td className="py-3.5 px-6">
+                      <div className="space-y-1">
+                        <div className="h-3.5 bg-[#e3e8ee] rounded w-24" />
+                        <div className="h-2.5 bg-[#e3e8ee] rounded w-32" />
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-6">
+                      <div className="h-5 bg-[#e3e8ee] rounded-full w-20" />
+                    </td>
+                    <td className="py-3.5 px-6">
+                      <div className="h-4 bg-[#e3e8ee] rounded w-44" />
+                    </td>
+                    <td className="py-3.5 px-6 text-right">
+                      <div className="h-4 bg-[#e3e8ee] rounded w-16 ml-auto" />
+                    </td>
+                    <td className="py-3.5 px-6 text-right">
+                      <div className="h-4 bg-[#e3e8ee] rounded w-14 ml-auto" />
+                    </td>
+                  </tr>
+                ))
+              ) : filteredEvents.length > 0 ? (
+                  filteredEvents.map((event, idx) => {
+                    const isApi = event?.usage_type === 'api_call' || String(event?.metric || '').toLowerCase().includes('api');
+                    let meta = event?.metadata;
+                    if (typeof meta === 'string') {
+                      try {
+                        meta = JSON.parse(meta);
+                      } catch {
+                        meta = null;
+                      }
+                    }
+                    return (
+                        <tr key={event?.id || idx} className="hover:bg-[#f6f9fc] transition-colors">
+                          {/* Timestamp */}
+                          <td className="py-3.5 px-6 font-mono text-xs text-[#64748d] tnum">
+                            <div>{event?.date || 'N/A'}</div>
+                            <div className="text-[10px] text-[#61718a]">{event?.time || ''}</div>
+                          </td>
+
+                          {/* Tenant Account */}
+                          <td className="py-3.5 px-6">
+                            <div className="font-normal text-[#0d253d]">{event?.tenant || event?.tenant_name || 'Tenant Account'}</div>
+                            <div className="text-[11px] text-[#64748d] font-mono tnum truncate max-w-[160px]">
+                              {event?.idempotency_key || event?.tenant_id || ''}
+                            </div>
+                          </td>
+
+                          {/* Metric Badge */}
+                          <td className="py-3.5 px-6">
+                            <span className="pill-tag-soft">
+                              {event?.metric || (isApi ? 'API Calls' : 'AI Tokens')}
+                            </span>
+                          </td>
+
+                          {/* Detailed Token Categorization */}
+                          <td className="py-3.5 px-6 text-xs text-[#64748d]">
+                            {!isApi && meta ? (
+                              <div className="flex flex-wrap gap-2 text-[11px] font-mono tnum">
+                                <span className="text-[#0d253d]" title="Input tokens">In: {(Number(meta.input_tokens) || 0).toLocaleString()}</span>
+                                <span className="text-[#64748d]" title="Cached input tokens">Cached: {(Number(meta.cached_input_tokens || meta.cached_tokens) || 0).toLocaleString()}</span>
+                                <span className="text-[#3F6212] font-semibold" title="Output tokens">Out: {(Number(meta.output_tokens) || 0).toLocaleString()}</span>
+                                {meta.reasoning_tokens ? (
+                        <span className="text-[#ea2261]" title="Reasoning tokens">Reason: {(Number(meta.reasoning_tokens) || 0).toLocaleString()}</span>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-[#64748d] text-xs font-mono">Standard HTTP API Request</span>
+                            )}
+                          </td>
+
+                          {/* Units */}
+                          <td className="py-3.5 px-6 text-right font-mono tnum text-[#0d253d]">
+                            {(Number(event?.value) || 0).toLocaleString()}
+                          </td>
+
+                          {/* Cost */}
+                          <td className="py-3.5 px-6 text-right font-medium text-[#0d253d] font-mono tnum">
+                            {event?.cost_formatted || `$${(Number(event?.cost) || 0).toFixed(4)}`}
+                          </td>
+                        </tr>
+                        );
+                })
+                        ) : (
+                        <tr>
+                          <td colSpan="6" className="py-16 text-center">
+                            <div className="max-w-sm mx-auto text-center">
+                              <div className="w-12 h-12 rounded-2xl bg-[#f6f9fc] border border-[#e3e8ee] text-slate-400 flex items-center justify-center mx-auto mb-3 shadow-sm">
+                                <Activity className="w-6 h-6 text-[#4D7C0F]" />
+                              </div>
+                              <h3 className="text-sm font-semibold text-[#0d253d] mb-1">
+                                {events.length === 0 ? 'No Usage Events Recorded Yet' : 'No Events Match Current Filters'}
+                              </h3>
+                              <p className="text-xs text-[#64748d] mb-4 leading-relaxed">
+                                {events.length === 0
+                                  ? 'Real-time micro-metered telemetry will populate here as applications send billable API requests or AI token events.'
+                                  : 'Try adjusting your metric filter, tenant scope, or search terms.'}
+                              </p>
+                              {events.length === 0 && permissions?.isPlatformAdmin ? (
+                                <button
+                                  onClick={() => setIsSimulateOpen(true)}
+                                  className="btn-primary-pill text-xs py-2 px-4 inline-flex items-center gap-1.5"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Simulate Test Event
+                                </button>
+                              ) : events.length === 0 ? null : (
+                                <button
+                                  onClick={() => {
+                                    setSelectedTenant('all');
+                                    setSelectedMetric('all');
+                                    setSearchQuery('');
+                                  }}
+                                  className="btn-secondary-pill text-xs py-1.5 px-3"
+                                >
+                                  Reset Filters
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
               )}
-            </tbody>
+                      </tbody>
           </table>
         </div>
       </div>
@@ -489,12 +494,12 @@ const FramerUsage = () => {
                     required
                     className="text-input-stripi w-full"
                   >
-                    {(Array.isArray(tenants) ? tenants : []).map((t) => (
-                      <option key={t?.id || Math.random()} value={t?.id}>
-                        {t?.name || t?.tenant_name || 'Tenant'} ({t?.plan || 'Free'})
-                      </option>
-                    ))}
-                  </select>
+                        {(Array.isArray(tenants) ? tenants : []).map((t) => (
+                          <option key={t?.id || Math.random()} value={t?.id}>
+                            {t?.name || t?.tenant_name || 'Tenant'} ({t?.plan || 'Free'})
+                          </option>
+                        ))}
+                      </select>
                 </div>
 
                 <div>

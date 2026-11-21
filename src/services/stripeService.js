@@ -35,8 +35,8 @@ class StripeService {
       throw new Error('STRIPE_SECRET_KEY is not configured in environment variables');
     }
 
-    if (!secretKey.startsWith('sk_test_')) {
-      throw new Error('Invalid Stripe configuration: Only Stripe TEST-MODE keys (sk_test_*) are supported');
+    if (!secretKey.startsWith('sk_test_') && !secretKey.startsWith('sk_live_')) {
+      throw new Error('Invalid Stripe configuration: STRIPE_SECRET_KEY must start with sk_test_ or sk_live_');
     }
 
     if (!webhookSecret) {
@@ -102,14 +102,13 @@ class StripeService {
       return null;
     }
 
-    // If user provided a prod_... Product ID, map to known price ID
+    // If user provided a prod_... Product ID, resolve configured price ID mapping
     if (configuredPrice.startsWith('prod_')) {
-      const knownProductPriceMap = {
-        'prod_VepBIdhJkDdzOl': 'price_1UdVWtRoVkcBCAcRToRRFrwd',
-        'prod_Vep95pujQznAeX': 'price_1UdVVfRoVkcBCAcRLmYxYT6H'
-      };
-      if (knownProductPriceMap[configuredPrice]) {
-        return knownProductPriceMap[configuredPrice];
+      if (process.env.STRIPE_PRODUCT_PRO_ID && configuredPrice === process.env.STRIPE_PRODUCT_PRO_ID) {
+        return (process.env.STRIPE_PRICE_PRO || '').trim();
+      }
+      if (process.env.STRIPE_PRODUCT_FREE_ID && configuredPrice === process.env.STRIPE_PRODUCT_FREE_ID) {
+        return (process.env.STRIPE_PRICE_FREE || '').trim();
       }
     }
 
@@ -126,7 +125,7 @@ class StripeService {
     const trimmed = priceId.trim();
     const proPriceId = this.getPriceId('Pro');
 
-    if (trimmed === proPriceId || trimmed === 'prod_Vep95pujQznAeX' || trimmed === 'price_1UdVVfRoVkcBCAcRLmYxYT6H') {
+    if (trimmed === proPriceId || (process.env.STRIPE_PRODUCT_PRO_ID && trimmed === process.env.STRIPE_PRODUCT_PRO_ID)) {
       return 'Pro';
     }
     return 'Free';
@@ -198,6 +197,46 @@ class StripeService {
     );
 
     return customerId;
+  }
+
+  /**
+   * Create a Stripe Customer Billing Portal session.
+   * Enables self-service payment method updates, invoice history inspection, and receipts.
+   * 
+   * @param {string} tenantId - Tenant UUID
+   * @param {string} [returnUrl] - Redirect URL after portal session
+   * @returns {Promise<{ url: string }>}
+   */
+  async createCustomerPortalSession(tenantId, returnUrl) {
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      const err = new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+      err.statusCode = 503;
+      throw err;
+    }
+
+    const tenantResult = await pool.query(
+      'SELECT id, name, email, stripe_customer_id FROM tenants WHERE id = $1',
+      [tenantId]
+    );
+
+    if (tenantResult.rows.length === 0) {
+      const err = new Error('Tenant not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const tenant = tenantResult.rows[0];
+    const customerId = await this.getOrCreateCustomer(tenant);
+
+    const defaultReturnUrl = returnUrl || process.env.STRIPE_PORTAL_RETURN_URL || process.env.APP_URL || 'http://localhost:5173/dashboard/history';
+
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: defaultReturnUrl,
+    });
+
+    return { url: portalSession.url };
   }
 
   /**

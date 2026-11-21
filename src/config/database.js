@@ -1,21 +1,45 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'usage_metering',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'password',
-});
+const isProduction = process.env.NODE_ENV === 'production';
+const hasDatabaseUrl = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim().length > 0);
+
+// Determine SSL requirements: enabled if DB_SSL=true or if production cloud database (e.g. Supabase, RDS, Neon)
+const useSsl = process.env.DB_SSL === 'true' || 
+  (hasDatabaseUrl && !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1'));
+
+const poolConfig = hasDatabaseUrl
+  ? {
+      connectionString: process.env.DATABASE_URL.trim(),
+      ssl: useSsl ? { rejectUnauthorized: false } : false,
+      max: parseInt(process.env.DB_POOL_MAX || '20', 10),
+      min: parseInt(process.env.DB_POOL_MIN || '2', 10),
+      idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000', 10),
+      connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT || '5000', 10),
+    }
+  : {
+      host: (process.env.DB_HOST || 'localhost').trim(),
+      port: parseInt(process.env.DB_PORT || '5432', 10),
+      database: (process.env.DB_NAME || 'usage_metering').trim(),
+      user: (process.env.DB_USER || 'postgres').trim(),
+      password: (process.env.DB_PASSWORD || 'password').trim(),
+      ssl: useSsl ? { rejectUnauthorized: false } : false,
+      max: parseInt(process.env.DB_POOL_MAX || '20', 10),
+      min: parseInt(process.env.DB_POOL_MIN || '2', 10),
+      idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000', 10),
+      connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT || '5000', 10),
+    };
+
+const pool = new Pool(poolConfig);
 
 pool.on('connect', () => {
-  console.log('Connected to PostgreSQL database');
+  // Connection acquired
 });
 
+// Production resilience: NEVER call process.exit() on idle client errors.
+// Transient network resets in managed clouds should not terminate the application process.
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  console.error('[PostgreSQL Pool Error] Unexpected error on idle client:', err.message);
 });
 
 module.exports = pool;

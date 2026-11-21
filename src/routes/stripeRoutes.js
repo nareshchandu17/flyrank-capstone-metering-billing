@@ -19,6 +19,7 @@ router.get('/webhooks/events', requireAuth0User, requirePlatformAdmin, stripeCon
 router.post('/checkout', sensitiveOpLimiter, requireAuth0User, requirePermission(PERMISSIONS.BILLING_MANAGE), stripeController.createCheckoutSession);
 router.post('/upgrade', sensitiveOpLimiter, requireAuth0User, requirePermission(PERMISSIONS.BILLING_MANAGE), stripeController.upgradeSubscription);
 router.post('/cancel', sensitiveOpLimiter, requireAuth0User, requirePermission(PERMISSIONS.BILLING_MANAGE), stripeController.cancelSubscription);
+router.post('/portal', sensitiveOpLimiter, requireAuth0User, requirePermission(PERMISSIONS.BILLING_MANAGE), stripeController.createCustomerPortalSession);
 
 // 4. Recoverable Invoice Synchronization
 router.post('/invoices/:invoice_id/sync', requireAuth0User, requirePermission(PERMISSIONS.BILLING_MANAGE), stripeController.syncInvoiceToStripe);

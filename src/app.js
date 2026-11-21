@@ -15,6 +15,9 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+// Trust reverse proxy headers (AWS ALB, Cloudflare, Render, Nginx) for accurate client IP rate limiting
+app.set('trust proxy', 1);
+
 // 1. Security Headers via Helmet
 app.use(helmet({
   contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,

@@ -91,12 +91,46 @@ const requireAuth0User = (req, res, next) => {
         });
       }
 
+      let email = payload.email || 
+        payload[`${process.env.AUTH0_AUDIENCE}/email`] || 
+        payload['https://flyrank.com/email'] || 
+        payload['https://api.flyrank-metering/email'] || 
+        null;
+
+      let name = payload.name || 
+        payload[`${process.env.AUTH0_AUDIENCE}/name`] || 
+        payload['https://flyrank.com/name'] || 
+        payload['https://api.flyrank-metering/name'] || 
+        payload.nickname || 
+        null;
+
+      let picture = payload.picture || null;
+
+      // If email is not present in the access token, query the standard OIDC /userinfo endpoint
+      const issuerBaseURL = process.env.AUTH0_ISSUER_BASE_URL || (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : null);
+      if (!email && issuerBaseURL && req.headers.authorization) {
+        try {
+          const userinfoUrl = new URL('/userinfo', issuerBaseURL).toString();
+          const infoRes = await fetch(userinfoUrl, {
+            headers: { Authorization: req.headers.authorization }
+          });
+          if (infoRes.ok) {
+            const info = await infoRes.json();
+            if (info.email) email = info.email;
+            if (info.name && !name) name = info.name;
+            if (info.picture && !picture) picture = info.picture;
+          }
+        } catch {
+          // Gracefully fallback on sub-derived identifier if userinfo is unavailable
+        }
+      }
+
       // Synchronize authenticated user with PostgreSQL app_users table
       const appUser = await userService.syncUserFromAuth0({
         sub,
-        email: payload.email || payload[`${process.env.AUTH0_AUDIENCE}/email`] || null,
-        name: payload.name || payload[`${process.env.AUTH0_AUDIENCE}/name`] || null,
-        picture: payload.picture || null
+        email,
+        name,
+        picture
       });
 
       req.user = appUser;
