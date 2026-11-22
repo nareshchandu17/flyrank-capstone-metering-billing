@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getUsageHistory, getTenants, exportUsageToCsv, recordUsage } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,7 +49,7 @@ const FramerUsage = () => {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const fetchData = async (isManual = false) => {
+  const fetchData = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     else setLoading(true);
 
@@ -71,11 +71,11 @@ const FramerUsage = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [simTenantId]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   // Filter events safely with null-checks
   const filteredEvents = (Array.isArray(events) ? events : []).filter(event => {

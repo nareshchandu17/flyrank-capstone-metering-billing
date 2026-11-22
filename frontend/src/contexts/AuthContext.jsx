@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { setTokenGetter, setActiveTenantHeader, getMe } from '../utils/api';
 
@@ -42,7 +42,7 @@ export const AuthProvider = ({ children }) => {
 }, [isAuthenticated, getAccessTokenSilently]);
 
   // Sync user profile and tenant memberships from backend
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (!isAuthenticated) return;
     setIsSyncing(true);
     setSyncError(null);
@@ -72,7 +72,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setIsSyncing(false);
     }
-  };
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated && !isAuth0Loading) {
@@ -84,7 +84,7 @@ export const AuthProvider = ({ children }) => {
       sessionStorage.removeItem('active_tenant_id');
       setActiveTenantHeader(null);
     }
-  }, [isAuthenticated, isAuth0Loading]);
+  }, [isAuthenticated, isAuth0Loading, refreshUser]);
 
   // When active tenant changes, update session and request header
   const switchTenant = (tenantId) => {

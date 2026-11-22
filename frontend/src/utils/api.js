@@ -336,7 +336,7 @@ export const getInvoices = async (tenantId) => {
       headers: target ? { 'X-Tenant-ID': target } : {}
     });
     return response.data.data || response.data || [];
-  } catch (err) {
+  } catch {
     return [];
   }
 };

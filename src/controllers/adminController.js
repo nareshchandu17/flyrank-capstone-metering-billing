@@ -1,5 +1,6 @@
 const pool = require('../config/database');
 const meterService = require('../services/meterService');
+const { calculateAPICallCost, calculateAITokenCost } = require('../config/pricing');
 
 class AdminController {
   /**
@@ -12,26 +13,69 @@ class AdminController {
         SELECT 
           t.id, t.name, t.email, t.status, 
           p.name as plan, p.id as plan_id,
-          t.created_at
+          t.created_at,
+          COALESCE(u.monthly_api_calls, 0) as monthly_api_calls,
+          COALESCE(u.monthly_ai_tokens, 0) as monthly_ai_tokens,
+          COALESCE(u.total_input_tokens, 0) as total_input_tokens,
+          COALESCE(u.total_cached_input_tokens, 0) as total_cached_input_tokens,
+          COALESCE(u.total_output_tokens, 0) as total_output_tokens,
+          COALESCE(u.total_reasoning_tokens, 0) as total_reasoning_tokens
         FROM tenants t
         JOIN plans p ON t.plan_id = p.id
+        LEFT JOIN (
+          SELECT 
+            tenant_id,
+            COALESCE(SUM(CASE WHEN usage_type = 'api_call' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN quantity ELSE 0 END), 0) as monthly_api_calls,
+            COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN quantity ELSE 0 END), 0) as monthly_ai_tokens,
+            COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'input_tokens')::numeric, 0) ELSE 0 END), 0) as total_input_tokens,
+            COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'cached_input_tokens')::numeric, (metadata->>'cached_tokens')::numeric, 0) ELSE 0 END), 0) as total_cached_input_tokens,
+            COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'output_tokens')::numeric, 0) ELSE 0 END), 0) as total_output_tokens,
+            COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'reasoning_tokens')::numeric, 0) ELSE 0 END), 0) as total_reasoning_tokens
+          FROM usage_events
+          GROUP BY tenant_id
+        ) u ON t.id = u.tenant_id
         ORDER BY t.created_at DESC
       `;
       const result = await pool.query(query);
 
-      const tenants = result.rows;
+      // In-memory O(1) enrichment: zero extra SQL queries per tenant
+      const tenants = result.rows.map(row => {
+        const apiCallsUsed = parseInt(row.monthly_api_calls || 0, 10);
+        const aiTokensUsed = parseInt(row.monthly_ai_tokens || 0, 10);
+        let inputTokens = parseInt(row.total_input_tokens || 0, 10);
+        const cachedInputTokens = parseInt(row.total_cached_input_tokens || 0, 10);
+        const outputTokens = parseInt(row.total_output_tokens || 0, 10);
+        const reasoningTokens = parseInt(row.total_reasoning_tokens || 0, 10);
 
-      // Calculate current month usage & cost for each tenant
-      for (let i = 0; i < tenants.length; i++) {
-        try {
-          const summary = await meterService.getUsageSummary(tenants[i].id);
-          tenants[i].usage = summary.usage.api_calls.used + summary.usage.ai_tokens.used;
-          tenants[i].cost = summary.costs.total_dollars;
-        } catch (e) {
-          tenants[i].usage = 0;
-          tenants[i].cost = 0;
+        const brokenDownTokens = inputTokens + cachedInputTokens + outputTokens + reasoningTokens;
+        if (aiTokensUsed > brokenDownTokens) {
+          inputTokens += (aiTokensUsed - brokenDownTokens);
         }
-      }
+
+        const tokenBreakdown = {
+          input_tokens: inputTokens,
+          cached_input_tokens: cachedInputTokens,
+          output_tokens: outputTokens,
+          reasoning_tokens: reasoningTokens
+        };
+
+        const apiCallCost = calculateAPICallCost(apiCallsUsed);
+        const aiTokenExactCents = calculateAITokenCost(tokenBreakdown, { exact: true });
+        const totalExactCents = apiCallCost + aiTokenExactCents;
+        const totalDollars = (totalExactCents / 100).toFixed(2);
+
+        return {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          status: row.status,
+          plan: row.plan,
+          plan_id: row.plan_id,
+          created_at: row.created_at,
+          usage: apiCallsUsed + aiTokensUsed,
+          cost: totalDollars
+        };
+      });
 
       res.status(200).json(tenants);
     } catch (error) {
@@ -46,11 +90,30 @@ class AdminController {
    */
   async createTenant(req, res) {
     try {
-      const { name, email, plan = 'Free' } = req.body;
+      const rawName = req.body.name;
+      const rawEmail = req.body.email;
+      const rawPlan = req.body.plan || 'Free';
 
-      if (!name || !email) {
-        return res.status(400).json({ error: 'Name and email are required' });
+      // Strict schema sanitization & validation
+      if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
+        return res.status(400).json({ error: 'Valid tenant name is required' });
       }
+      const name = rawName.trim();
+      if (name.length < 2 || name.length > 100) {
+        return res.status(400).json({ error: 'Tenant name must be between 2 and 100 characters' });
+      }
+
+      if (!rawEmail || typeof rawEmail !== 'string') {
+        return res.status(400).json({ error: 'Email is required' });
+      }
+      const email = rawEmail.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email) || email.length > 255) {
+        return res.status(400).json({ error: 'Invalid email address format' });
+      }
+
+      const validPlans = ['Free', 'Pro', 'Enterprise'];
+      const plan = validPlans.includes(rawPlan) ? rawPlan : 'Free';
 
       const planResult = await pool.query('SELECT id FROM plans WHERE name = $1', [plan]);
       if (planResult.rows.length === 0) {

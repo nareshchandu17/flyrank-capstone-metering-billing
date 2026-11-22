@@ -17,7 +17,6 @@ import {
   AlertTriangle,
   Terminal,
   Plus,
-  Building2,
   Sparkles
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';

@@ -56,7 +56,14 @@ class AIService {
           }
         }
 
-        // 4. High-fidelity local token generation & accurate token accounting
+        // 4. In production, fail fast if no provider keys are available
+        if (process.env.NODE_ENV === 'production') {
+          const err = new Error('AI inference service unavailable. Configure GEMINI_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY.');
+          err.statusCode = 503;
+          throw err;
+        }
+
+        // In test or local development environments, provide offline token generation for testing
         return this.generateLocal(prompt, options, startTime);
       }
 

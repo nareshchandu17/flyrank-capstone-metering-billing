@@ -225,6 +225,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_id ON usage_events(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_created ON usage_events(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_created_type ON usage_events(tenant_id, created_at, usage_type);
 CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer_id ON tenants(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_id ON subscriptions(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_subscription_id ON subscriptions(stripe_subscription_id);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getInvoices,
@@ -63,7 +63,7 @@ const FramerHistory = () => {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const fetchBillingData = async (isManual = false) => {
+  const fetchBillingData = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     else setLoading(true);
 
@@ -85,11 +85,11 @@ const FramerHistory = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [genTenantId]);
 
   useEffect(() => {
     fetchBillingData();
-  }, []);
+  }, [fetchBillingData]);
 
   // Inspect invoice detail with full line items
   const handleInspectInvoice = async (inv) => {

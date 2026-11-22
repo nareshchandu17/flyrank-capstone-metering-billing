@@ -205,13 +205,12 @@ class MeterService {
    * @returns {Object} - Quota check result
    */
   async checkQuota(client, tenantId, usageType, requestedQuantity) {
-    // Acquire row-level lock on tenant to guarantee concurrency-safety
+    // 1. Inspect tenant and plan quota parameters
     const tenantQuery = `
       SELECT t.id, t.name, t.email, t.plan_id, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
       FROM tenants t
       JOIN plans p ON t.plan_id = p.id
       WHERE t.id = $1 AND t.status = 'active'
-      FOR UPDATE OF t
     `;
     
     const tenantResult = await client.query(tenantQuery, [tenantId]);
@@ -225,6 +224,14 @@ class MeterService {
     }
     
     const tenant = tenantResult.rows[0];
+
+    // For plans without overage (e.g. Free tier), acquire an exclusive row-lock on tenant
+    // to strictly serialize quota evaluations without race conditions.
+    // For Pro/Enterprise tiers where overage is permitted, lock-free evaluation permits high-throughput concurrent writes.
+    if (!tenant.allow_overage) {
+      await client.query('SELECT 1 FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+    }
+
     const limit = usageType === 'api_call' ? tenant.api_calls_limit : tenant.ai_tokens_limit;
     
     // Get current usage for the current month

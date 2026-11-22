@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   getTenants,
@@ -9,8 +9,15 @@ import {
   getApiKeys,
   createApiKey,
   rotateApiKey,
-  revokeApiKey
+  revokeApiKey,
+  getTenantMembers,
+  updateTenantMember,
+  removeTenantMember,
+  getTenantInvitations,
+  inviteTenantMember,
+  revokeTenantInvitation
 } from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Search,
   Plus,
@@ -25,14 +32,31 @@ import {
   Check,
   ShieldAlert,
   ArrowRight,
-  Building2
+  Building2,
+  UserPlus,
+  Mail,
+  Clock,
+  UserX,
+  RotateCw
 } from 'lucide-react';
 
 const FramerTenants = () => {
+  const { activeTenant: contextTenant, permissions } = useAuth();
+  const [activeTab, setActiveTab] = useState('organizations'); // 'organizations' | 'members'
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Member Management States
+  const [selectedMemberTenantId, setSelectedMemberTenantId] = useState('');
+  const [members, setMembers] = useState([]);
+  const [invitations, setInvitations] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('Developer');
+  const [inviting, setInviting] = useState(false);
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -244,6 +268,106 @@ const FramerTenants = () => {
     setTimeout(() => setCopiedKey(false), 2500);
   };
 
+  // Fetch members and pending invitations for an organization
+  const fetchMembers = useCallback(async (tenantId) => {
+    const target = tenantId || selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    if (!target) return;
+    try {
+      setLoadingMembers(true);
+      const [membersData, invitesData] = await Promise.all([
+        getTenantMembers(target).catch(() => []),
+        getTenantInvitations(target).catch(() => [])
+      ]);
+      setMembers(Array.isArray(membersData) ? membersData : []);
+      setInvitations(Array.isArray(invitesData) ? invitesData : []);
+    } catch (err) {
+      console.error('Error fetching members:', err);
+      showToast('Failed to load organization members', 'error');
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, [selectedMemberTenantId, contextTenant?.tenant_id, contextTenant?.id, tenants]);
+
+  useEffect(() => {
+    if (activeTab === 'members') {
+      const target = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+      if (target) {
+        setSelectedMemberTenantId(target);
+        fetchMembers(target);
+      }
+    }
+  }, [activeTab, selectedMemberTenantId, contextTenant?.tenant_id, contextTenant?.id, tenants, fetchMembers]);
+
+  // Send member invitation
+  const handleSendInvitation = async (e) => {
+    e.preventDefault();
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    if (!targetTenantId || !inviteEmail.trim()) {
+      showToast('Recipient email is required', 'error');
+      return;
+    }
+    try {
+      setInviting(true);
+      await inviteTenantMember(targetTenantId, { email: inviteEmail.trim(), role: inviteRole });
+      showToast(`Invitation dispatched to ${inviteEmail} (${inviteRole})`);
+      setIsInviteOpen(false);
+      setInviteEmail('');
+      setInviteRole('Developer');
+      fetchMembers(targetTenantId);
+    } catch (err) {
+      console.error('Error sending invitation:', err);
+      showToast(err.response?.data?.error || err.message || 'Failed to dispatch invitation', 'error');
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  // Update member role
+  const handleUpdateMemberRole = async (memberId, newRole) => {
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    if (!targetTenantId) return;
+    try {
+      await updateTenantMember(targetTenantId, memberId, { role: newRole });
+      showToast('Member role updated successfully');
+      fetchMembers(targetTenantId);
+    } catch (err) {
+      console.error('Error updating member role:', err);
+      showToast(err.response?.data?.error || err.message || 'Failed to update member role', 'error');
+    }
+  };
+
+  // Remove member
+  const handleRemoveMember = async (memberId, memberName) => {
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    if (!targetTenantId) return;
+    if (!window.confirm(`Are you sure you want to remove ${memberName || 'this member'} from the organization?`)) {
+      return;
+    }
+    try {
+      await removeTenantMember(targetTenantId, memberId);
+      showToast('Member removed from organization');
+      fetchMembers(targetTenantId);
+    } catch (err) {
+      console.error('Error removing member:', err);
+      showToast(err.response?.data?.error || err.message || 'Failed to remove member', 'error');
+    }
+  };
+
+  // Revoke invitation
+  const handleRevokeInvitation = async (invitationId) => {
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    if (!targetTenantId) return;
+    if (!window.confirm('Are you sure you want to revoke this pending invitation?')) return;
+    try {
+      await revokeTenantInvitation(targetTenantId, invitationId);
+      showToast('Invitation revoked');
+      fetchMembers(targetTenantId);
+    } catch (err) {
+      console.error('Error revoking invitation:', err);
+      showToast(err.response?.data?.error || err.message || 'Failed to revoke invitation', 'error');
+    }
+  };
+
   // Filter tenants safely with null-checks
   const filteredTenants = (Array.isArray(tenants) ? tenants : []).filter(t => {
     if (!t) return false;
@@ -294,17 +418,66 @@ const FramerTenants = () => {
           </p>
         </div>
 
+        {activeTab === 'organizations' ? (
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="btn-primary-pill"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Tenant</span>
+          </button>
+        ) : (
+          permissions?.canManageMembers && (
+            <button
+              onClick={() => setIsInviteOpen(true)}
+              className="btn-primary-pill"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Invite Member</span>
+            </button>
+          )
+        )}
+      </div>
+
+      {/* Sub-Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-[#e3e8ee] pb-3">
         <button
-          onClick={() => setIsCreateOpen(true)}
-          className="btn-primary-pill"
+          type="button"
+          onClick={() => setActiveTab('organizations')}
+          className={`px-4 py-2 rounded-full text-xs font-semibold transition-all flex items-center gap-2 ${
+            activeTab === 'organizations'
+              ? 'bg-[#0d253d] text-white shadow-sm'
+              : 'bg-white text-[#64748d] hover:text-[#0d253d] border border-[#e3e8ee]'
+          }`}
         >
-          <Plus className="w-4 h-4" />
-          <span>New Tenant</span>
+          <Building2 className="w-3.5 h-3.5" />
+          <span>Organizations ({tenants.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('members');
+            const targetId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+            if (targetId) {
+              setSelectedMemberTenantId(targetId);
+              fetchMembers(targetId);
+            }
+          }}
+          className={`px-4 py-2 rounded-full text-xs font-semibold transition-all flex items-center gap-2 ${
+            activeTab === 'members'
+              ? 'bg-[#0d253d] text-white shadow-sm'
+              : 'bg-white text-[#64748d] hover:text-[#0d253d] border border-[#e3e8ee]'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5" />
+          <span>Team Members & Roles</span>
         </button>
       </div>
 
-      {/* Search & Filter Toolbar */}
-      <div className="card-stripi p-4 bg-white flex flex-col md:flex-row items-center justify-between gap-4">
+      {activeTab === 'organizations' ? (
+        <>
+          {/* Search & Filter Toolbar */}
+          <div className="card-stripi p-4 bg-white flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748d]" />
           <input
@@ -499,6 +672,226 @@ const FramerTenants = () => {
           </table>
         </div>
       </div>
+    </>
+  ) : (
+    <div className="space-y-6">
+      {/* Member Context & Filter Toolbar */}
+      <div className="card-stripi p-4 bg-white flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <span className="text-xs font-semibold text-[#64748d] uppercase tracking-wider flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-[#4D7C0F]" /> Organization:
+          </span>
+          <select
+            value={selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || ''}
+            onChange={(e) => {
+              setSelectedMemberTenantId(e.target.value);
+              fetchMembers(e.target.value);
+            }}
+            className="text-input-stripi py-1.5 px-3 text-xs font-semibold text-[#0d253d] max-w-xs"
+          >
+            {tenants.map(t => (
+              <option key={t.id} value={t.id}>{t.name} ({t.tier || t.plan || 'Free'})</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => fetchMembers(selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id)}
+            className="btn-secondary-pill p-2 text-xs"
+            title="Refresh Member Roster"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${loadingMembers ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[#64748d]">
+            Your RBAC Role: <span className="font-semibold text-[#3F6212]">{contextTenant?.role || (permissions?.isPlatformAdmin ? 'Platform Admin' : 'Viewer')}</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Members Table */}
+      <div className="card-stripi bg-white overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#e3e8ee] flex items-center justify-between">
+          <div>
+            <h3 className="font-heading-sm text-[#0d253d]">Active Organization Members</h3>
+            <p className="text-xs text-[#64748d]">Authenticated Auth0 users authorized in this tenant</p>
+          </div>
+          <span className="pill-tag-soft text-xs">{members.length} {members.length === 1 ? 'Member' : 'Members'}</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-xs uppercase tracking-wider text-[#64748d]">
+                <th className="py-3 px-6 font-normal">Member Name & Email</th>
+                <th className="py-3 px-6 font-normal">Assigned Role</th>
+                <th className="py-3 px-6 font-normal">Membership Status</th>
+                <th className="py-3 px-6 font-normal">Joined Date</th>
+                <th className="py-3 px-6 font-normal text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#e3e8ee]">
+              {loadingMembers ? (
+                [...Array(3)].map((_, idx) => (
+                  <tr key={`member-skel-${idx}`} className="animate-pulse">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-[#e3e8ee]" />
+                        <div className="space-y-1.5">
+                          <div className="h-3.5 bg-[#e3e8ee] rounded w-24" />
+                          <div className="h-2.5 bg-[#e3e8ee] rounded w-36" />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 px-6"><div className="h-4 bg-[#e3e8ee] rounded w-20" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-[#e3e8ee] rounded w-16" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-[#e3e8ee] rounded w-24" /></td>
+                    <td className="py-4 px-6 text-right"><div className="h-6 bg-[#e3e8ee] rounded w-16 ml-auto" /></td>
+                  </tr>
+                ))
+              ) : members.length > 0 ? (
+                members.map((member) => (
+                  <tr key={member.id} className="hover:bg-[#f6f9fc] transition-colors">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
+                        {member.picture ? (
+                          <img src={member.picture} alt="" className="w-8 h-8 rounded-full object-cover border border-[#e3e8ee]" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-[#D4FF28]/25 text-[#3F6212] font-semibold flex items-center justify-center text-xs border border-[#C4EF1E]/40">
+                            {(member.name || member.email || 'U').charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <div className="font-medium text-[#0d253d]">{member.name || member.email.split('@')[0]}</div>
+                          <div className="text-xs text-[#64748d] font-mono">{member.email}</div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="py-4 px-6">
+                      {permissions?.canManageMembers ? (
+                        <select
+                          value={member.role}
+                          onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}
+                          className="text-xs font-semibold py-1 px-2 rounded-lg border border-[#e3e8ee] bg-white text-[#0d253d] cursor-pointer hover:border-[#BEF218]"
+                        >
+                          <option value="Tenant Owner">Tenant Owner</option>
+                          <option value="Billing Manager">Billing Manager</option>
+                          <option value="Developer">Developer</option>
+                          <option value="Viewer">Viewer</option>
+                        </select>
+                      ) : (
+                        <span className="pill-tag-soft text-xs">{member.role}</span>
+                      )}
+                    </td>
+
+                    <td className="py-4 px-6">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-normal ${
+                        member.status === 'active' ? 'bg-[#10b981]/10 text-[#059669]' : 'bg-[#ea2261]/10 text-[#ea2261]'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${member.status === 'active' ? 'bg-[#10b981]' : 'bg-[#ea2261]'}`} />
+                        <span className="capitalize">{member.status}</span>
+                      </span>
+                    </td>
+
+                    <td className="py-4 px-6 text-xs text-[#64748d] font-mono">
+                      {member.created_at ? new Date(member.created_at).toLocaleDateString() : 'N/A'}
+                    </td>
+
+                    <td className="py-4 px-6 text-right">
+                      {permissions?.canManageMembers && member.role !== 'Tenant Owner' && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMember(member.id, member.name || member.email)}
+                          className="p-1.5 rounded-full text-[#64748d] hover:text-[#ea2261] hover:bg-[#ea2261]/10 transition-colors"
+                          title="Remove Member"
+                        >
+                          <UserX className="w-4 h-4" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="py-12 text-center text-xs text-[#64748d]">
+                    No members found for this organization.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Pending Invitations Section */}
+      <div className="card-stripi bg-white overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#e3e8ee] flex items-center justify-between">
+          <div>
+            <h3 className="font-heading-sm text-[#0d253d]">Pending Invitations</h3>
+            <p className="text-xs text-[#64748d]">Single-use cryptographic invitations awaiting acceptance</p>
+          </div>
+          <span className="pill-tag-soft text-xs">{invitations.length} Pending</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-[#e3e8ee] bg-[#f6f9fc] text-xs uppercase tracking-wider text-[#64748d]">
+                <th className="py-3 px-6 font-normal">Invitee Email</th>
+                <th className="py-3 px-6 font-normal">Assigned Role</th>
+                <th className="py-3 px-6 font-normal">Status</th>
+                <th className="py-3 px-6 font-normal">Expires At</th>
+                <th className="py-3 px-6 font-normal text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#e3e8ee]">
+              {invitations.length > 0 ? (
+                invitations.map((inv) => (
+                  <tr key={inv.id} className="hover:bg-[#f6f9fc] transition-colors">
+                    <td className="py-3.5 px-6 font-mono text-xs text-[#0d253d] flex items-center gap-2">
+                      <Mail className="w-3.5 h-3.5 text-[#4D7C0F]" />
+                      {inv.email}
+                    </td>
+                    <td className="py-3.5 px-6">
+                      <span className="pill-tag-soft text-xs">{inv.role}</span>
+                    </td>
+                    <td className="py-3.5 px-6">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-amber-500/10 text-amber-700">
+                        <Clock className="w-3 h-3 text-amber-600" />
+                        Pending
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-6 text-xs text-[#64748d] font-mono">
+                      {inv.expires_at ? new Date(inv.expires_at).toLocaleString() : 'N/A'}
+                    </td>
+                    <td className="py-3.5 px-6 text-right">
+                      {permissions?.canManageMembers && (
+                        <button
+                          type="button"
+                          onClick={() => handleRevokeInvitation(inv.id)}
+                          className="text-xs text-[#ea2261] hover:underline font-medium"
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="py-8 text-center text-xs text-[#64748d]">
+                    No pending invitations for this organization.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )}
 
       {/* INSPECTION SLIDE-OVER DRAWER */}
       <AnimatePresence>
@@ -997,6 +1390,90 @@ const FramerTenants = () => {
                   <span>{deleting ? 'Deleting...' : 'Delete Tenant'}</span>
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* INVITE MEMBER MODAL */}
+      <AnimatePresence>
+        {isInviteOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsInviteOpen(false)}
+              className="absolute inset-0 bg-[#0d253d]/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative card-stripi bg-white p-6 max-w-md w-full shadow-level-3"
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-[#e3e8ee] mb-4">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-[#3F6212]" />
+                  <h3 className="font-heading-sm text-[#0d253d]">Invite Team Member</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInviteOpen(false)}
+                  className="p-1 rounded-full text-[#64748d] hover:text-[#0d253d] hover:bg-[#f6f9fc]"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSendInvitation} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#0d253d] mb-1">
+                    Invitee Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="teammate@company.com"
+                    className="text-input-stripi w-full"
+                  />
+                  <p className="text-[11px] text-[#64748d] mt-1">Recipient must authenticate with this Auth0 identity.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#0d253d] mb-1">
+                    Organization Role
+                  </label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    className="text-input-stripi w-full"
+                  >
+                    <option value="Viewer">Viewer (Read-only usage & invoices)</option>
+                    <option value="Developer">Developer (API keys & usage simulation)</option>
+                    <option value="Billing Manager">Billing Manager (Stripe & invoice generation)</option>
+                    <option value="Tenant Owner">Tenant Owner (Full member & tenant administration)</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end gap-2.5 pt-4 border-t border-[#e3e8ee]">
+                  <button
+                    type="button"
+                    onClick={() => setIsInviteOpen(false)}
+                    className="btn-secondary-pill text-xs py-2 px-4"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={inviting}
+                    className="btn-primary-pill text-xs py-2 px-5"
+                  >
+                    {inviting ? 'Dispatching...' : 'Send Invitation'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

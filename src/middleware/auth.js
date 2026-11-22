@@ -10,8 +10,8 @@ let jwtCheck = null;
 function getJwtCheck() {
   if (jwtCheck) return jwtCheck;
 
-  // Support local RS256 verification in test environments without external JWKS network requests
-  if (process.env.AUTH0_TEST_PUBLIC_KEY) {
+  // Support local RS256 verification strictly in test environments without external JWKS network requests
+  if (process.env.NODE_ENV === 'test' && process.env.AUTH0_TEST_PUBLIC_KEY) {
     const jwt = require('jsonwebtoken');
     return (req, res, next) => {
       const authHeader = req.headers.authorization;

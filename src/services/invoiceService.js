@@ -294,7 +294,7 @@ class InvoiceService {
               {
                 customer: tenant.stripe_customer_id,
                 amount: item.amount_cents,
-                currency: 'usd',
+                currency: (tenant.currency || 'usd').toLowerCase(),
                 description: item.description,
               },
               {

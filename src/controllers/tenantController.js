@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const meterService = require('../services/meterService');
+const { calculateAPICallCost, calculateAITokenCost } = require('../config/pricing');
 
 // Get all tenants with real usage, real calculated revenue, and active status
 const getAllTenants = async (req, res) => {
@@ -16,11 +17,36 @@ const getAllTenants = async (req, res) => {
         p.name as plan_name,
         p.api_calls_limit,
         p.ai_tokens_limit,
-        COUNT(DISTINCT ue.id) as total_events,
-        COUNT(DISTINCT CASE WHEN ue.created_at >= DATE_TRUNC('month', CURRENT_DATE) THEN ue.id END) as monthly_events
+        COALESCE(u.monthly_api_calls, 0) as monthly_api_calls,
+        COALESCE(u.monthly_ai_tokens, 0) as monthly_ai_tokens,
+        COALESCE(u.total_input_tokens, 0) as total_input_tokens,
+        COALESCE(u.total_cached_input_tokens, 0) as total_cached_input_tokens,
+        COALESCE(u.total_output_tokens, 0) as total_output_tokens,
+        COALESCE(u.total_reasoning_tokens, 0) as total_reasoning_tokens,
+        COALESCE(u.monthly_events, 0) as monthly_events,
+        COALESCE(u.total_events, 0) as total_events,
+        COALESCE(inv.total_cost_cents, 0) as total_invoiced_cents
       FROM tenants t
       LEFT JOIN plans p ON t.plan_id = p.id
-      LEFT JOIN usage_events ue ON t.id = ue.tenant_id
+      LEFT JOIN (
+        SELECT 
+          tenant_id,
+          COUNT(*) as total_events,
+          COUNT(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN 1 END) as monthly_events,
+          COALESCE(SUM(CASE WHEN usage_type = 'api_call' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN quantity ELSE 0 END), 0) as monthly_api_calls,
+          COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN quantity ELSE 0 END), 0) as monthly_ai_tokens,
+          COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'input_tokens')::numeric, 0) ELSE 0 END), 0) as total_input_tokens,
+          COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'cached_input_tokens')::numeric, (metadata->>'cached_tokens')::numeric, 0) ELSE 0 END), 0) as total_cached_input_tokens,
+          COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'output_tokens')::numeric, 0) ELSE 0 END), 0) as total_output_tokens,
+          COALESCE(SUM(CASE WHEN usage_type = 'ai_tokens' AND created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP) THEN COALESCE((metadata->>'reasoning_tokens')::numeric, 0) ELSE 0 END), 0) as total_reasoning_tokens
+        FROM usage_events
+        GROUP BY tenant_id
+      ) u ON t.id = u.tenant_id
+      LEFT JOIN (
+        SELECT tenant_id, SUM(amount_cents) as total_cost_cents
+        FROM invoices
+        GROUP BY tenant_id
+      ) inv ON t.id = inv.tenant_id
     `;
     const params = [];
 
@@ -29,34 +55,44 @@ const getAllTenants = async (req, res) => {
       params.push(req.user.id);
     }
 
-    query += `
-      GROUP BY t.id, t.name, t.email, t.status, t.stripe_customer_id, t.plan_id, t.created_at, p.name, p.api_calls_limit, p.ai_tokens_limit
-      ORDER BY t.created_at DESC
-    `;
+    query += ` ORDER BY t.created_at DESC`;
 
     const result = await db.query(query, params);
 
-    // Enrich with exact real-time costs and quotas
-    const enrichedTenants = [];
-    for (const row of result.rows) {
-      let tenantCost = '$0.00';
-      let tenantTotalUsage = parseInt(row.monthly_events || 0, 10);
-      let quotaLimit = (row.api_calls_limit || 0) + (row.ai_tokens_limit || 0);
+    // Enrich with exact real-time costs and quotas in-memory (O(1) calculation, zero extra DB queries)
+    const enrichedTenants = result.rows.map(row => {
+      const apiCallsUsed = parseInt(row.monthly_api_calls || 0, 10);
+      const aiTokensUsed = parseInt(row.monthly_ai_tokens || 0, 10);
+      let inputTokens = parseInt(row.total_input_tokens || 0, 10);
+      const cachedInputTokens = parseInt(row.total_cached_input_tokens || 0, 10);
+      const outputTokens = parseInt(row.total_output_tokens || 0, 10);
+      const reasoningTokens = parseInt(row.total_reasoning_tokens || 0, 10);
 
-      try {
-        const summary = await meterService.getUsageSummary(row.id);
-        tenantCost = `$${summary.costs?.total_dollars || '0.00'}`;
-        tenantTotalUsage = (summary.usage?.api_calls?.used || 0) + (summary.usage?.ai_tokens?.used || 0);
-      } catch (err) {
-        // Fallback to basic invoice sum if usage summary query fails
-        const invSum = await db.query(
-          'SELECT COALESCE(SUM(amount_cents), 0) as total FROM invoices WHERE tenant_id = $1',
-          [row.id]
-        );
-        tenantCost = `$${(parseInt(invSum.rows[0]?.total || 0, 10) / 100).toFixed(2)}`;
+      const brokenDownTokens = inputTokens + cachedInputTokens + outputTokens + reasoningTokens;
+      if (aiTokensUsed > brokenDownTokens) {
+        inputTokens += (aiTokensUsed - brokenDownTokens);
       }
 
-      enrichedTenants.push({
+      const tokenBreakdown = {
+        input_tokens: inputTokens,
+        cached_input_tokens: cachedInputTokens,
+        output_tokens: outputTokens,
+        reasoning_tokens: reasoningTokens
+      };
+
+      const apiCallCost = calculateAPICallCost(apiCallsUsed);
+      const aiTokenExactCents = calculateAITokenCost(tokenBreakdown, { exact: true });
+      const totalExactCents = apiCallCost + aiTokenExactCents;
+      const totalDollars = (totalExactCents / 100).toFixed(2);
+
+      const tenantCost = totalExactCents > 0
+        ? `$${totalDollars}`
+        : (row.total_invoiced_cents > 0 ? `$${(parseInt(row.total_invoiced_cents, 10) / 100).toFixed(2)}` : '$0.00');
+
+      const tenantTotalUsage = apiCallsUsed + aiTokensUsed;
+      const quotaLimit = (row.api_calls_limit || 0) + (row.ai_tokens_limit || 0);
+
+      return {
         ...row,
         tier: row.plan_name || 'Free',
         status: row.status || 'active',
@@ -65,8 +101,8 @@ const getAllTenants = async (req, res) => {
         cost: tenantCost.replace('$', ''),
         quota: quotaLimit,
         created: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
-      });
-    }
+      };
+    });
 
     res.json({ success: true, data: enrichedTenants });
   } catch (error) {
@@ -102,12 +138,31 @@ const getTenantById = async (req, res) => {
 const createTenant = async (req, res) => {
   const client = await db.connect();
   try {
-    const { name, email, plan = 'Free', plan_id } = req.body;
+    const { plan_id } = req.body;
+    const rawName = req.body.name;
+    const rawEmail = req.body.email;
+    const rawPlan = req.body.plan || 'Free';
 
-    // Validate input
-    if (!name || !email) {
-      return res.status(400).json({ success: false, message: 'Name and email are required' });
+    // Strict schema sanitization & validation
+    if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid organization name is required' });
     }
+    const name = rawName.trim();
+    if (name.length < 2 || name.length > 100) {
+      return res.status(400).json({ success: false, message: 'Organization name must be between 2 and 100 characters' });
+    }
+
+    if (!rawEmail || typeof rawEmail !== 'string') {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+    const email = rawEmail.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email) || email.length > 255) {
+      return res.status(400).json({ success: false, message: 'Invalid email address format' });
+    }
+
+    const validPlans = ['Free', 'Pro', 'Enterprise'];
+    const plan = validPlans.includes(rawPlan) ? rawPlan : 'Free';
 
     if (!req.user?.id) {
       return res.status(401).json({ success: false, message: 'Authentication required to create a tenant organization' });

@@ -82,7 +82,7 @@ class NotificationService {
           [tenantId, alertType, billingPeriod, metricType]
         );
       } catch (dbErr) {
-        // Ignored if offline or duplicate
+        console.warn(`[NotificationService] Notice: Could not record alert in database: ${dbErr.message}`);
       }
 
       console.log(`[ALERT DISPATCHED] Tenant: ${payload.tenant.name} | Level: ${severity} (${percentage}%) | Metric: ${metricType} (${currentUsage}/${limit}) | Email: ${results.email?.status} -> ${destinationEmail}`);

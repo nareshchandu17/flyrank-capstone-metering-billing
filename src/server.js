@@ -2,34 +2,34 @@ require('dotenv').config();
 
 // Validate critical Auth0 configuration during production startup
 if (process.env.NODE_ENV === 'production') {
-    const missing = [];
-    if (!process.env.AUTH0_DOMAIN && !process.env.AUTH0_ISSUER_BASE_URL) missing.push('AUTH0_DOMAIN or AUTH0_ISSUER_BASE_URL');
-    if (!process.env.AUTH0_AUDIENCE) missing.push('AUTH0_AUDIENCE');
-    if (missing.length > 0) {
-      console.error('\n' + '='.repeat(70));
-      console.error(`FATAL CONFIGURATION ERROR: Missing required Auth0 settings in production: ${missing.join(', ')}`);
-      console.error('The server refuses to start without verified Auth0 identity configuration.');
-      console.error('='.repeat(70) + '\n');
-      throw new Error(`Auth0 configuration missing in production: ${missing.join(', ')}`);
-    }
+  const missing = [];
+  if (!process.env.AUTH0_DOMAIN && !process.env.AUTH0_ISSUER_BASE_URL) missing.push('AUTH0_DOMAIN or AUTH0_ISSUER_BASE_URL');
+  if (!process.env.AUTH0_AUDIENCE) missing.push('AUTH0_AUDIENCE');
+  if (missing.length > 0) {
+    console.error('\n' + '='.repeat(70));
+    console.error(`FATAL CONFIGURATION ERROR: Missing required Auth0 settings in production: ${missing.join(', ')}`);
+    console.error('The server refuses to start without verified Auth0 identity configuration.');
+    console.error('='.repeat(70) + '\n');
+    throw new Error(`Auth0 configuration missing in production: ${missing.join(', ')}`);
   }
+}
 
-  const app = require('./app');
-  const pool = require('./config/database');
-  const invoiceJob = require('./jobs/invoiceJob');
-  const reconcileJob = require('./jobs/reconcileJob');
-  const stripeService = require('./services/stripeService');
+const app = require('./app');
+const pool = require('./config/database');
+const invoiceJob = require('./jobs/invoiceJob');
+const reconcileJob = require('./jobs/reconcileJob');
+const stripeService = require('./services/stripeService');
 
-  const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-  // Database initialization
-  async function initializeDatabase() {
-    try {
-      const client = await pool.connect();
-      console.log('Database connection established');
+// Database initialization
+async function initializeDatabase() {
+  try {
+    const client = await pool.connect();
+    console.log('Database connection established');
 
-      // Ensure critical columns and tables exist for RBAC and metering
-      await client.query(`
+    // Ensure critical columns and tables exist for RBAC and metering
+    await client.query(`
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
       ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
@@ -121,6 +121,7 @@ if (process.env.NODE_ENV === 'production') {
       CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant ON tenant_memberships(tenant_id);
       CREATE INDEX IF NOT EXISTS idx_tenant_memberships_user ON tenant_memberships(user_id);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_created_type ON usage_events(tenant_id, created_at, usage_type);
 
       DO $$ 
       BEGIN
@@ -142,18 +143,20 @@ if (process.env.NODE_ENV === 'production') {
       END $$;
     `);
 
-      client.release();
-    } catch (error) {
-      console.error('Database connection failed:', error);
-      process.exit(1);
-    }
+    client.release();
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    process.exit(1);
   }
+}
 
-  // Start server
-  async function startServer() {
-    await initializeDatabase();
+let server;
 
-    app.listen(PORT, () => {
+// Start server
+async function startServer() {
+  await initializeDatabase();
+
+    server = app.listen(PORT, () => {
       console.log('='.repeat(60));
       console.log('🚀 Usage Metering & Billing Engine - Backend Server');
       console.log('='.repeat(60));
@@ -184,6 +187,57 @@ if (process.env.NODE_ENV === 'production') {
       console.log('='.repeat(60));
     });
   }
+
+  // Graceful shutdown handler for containerized and production environments
+  let isShuttingDown = false;
+  function gracefulShutdown(signal) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`\nReceived ${signal}. Starting graceful shutdown...`);
+
+    // Stop recurring background jobs
+    try {
+      invoiceJob.stop();
+      reconcileJob.stop();
+      console.log('Stopped background cron jobs.');
+    } catch (jobErr) {
+      console.warn('Notice stopping background jobs:', jobErr.message);
+    }
+
+    if (server) {
+      server.close(async () => {
+        console.log('HTTP connection listener closed. Draining database connection pool...');
+        try {
+          await pool.end();
+          console.log('Database connections cleanly terminated. Server shutdown complete.');
+          process.exit(0);
+        } catch (poolErr) {
+          console.error('Error closing database pool:', poolErr.message);
+          process.exit(1);
+        }
+      });
+
+      // Force process exit if in-flight requests fail to drain within 10s
+      setTimeout(() => {
+        console.error('Graceful shutdown timed out after 10s. Forcing exit.');
+        process.exit(1);
+      }, 10000).unref();
+    } else {
+      process.exit(0);
+    }
+  }
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    gracefulShutdown('uncaughtException');
+  });
 
   startServer().catch(error => {
     console.error('Failed to start server:', error);

@@ -1,15 +1,23 @@
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import FramerLayout from './components/FramerLayout';
-import Landing from './pages/Landing';
-import LoginPage from './pages/LoginPage';
-import FramerDashboard from './pages/FramerDashboard';
-import FramerTenants from './pages/FramerTenants';
-import FramerUsage from './pages/FramerUsage';
-import FramerHistory from './pages/FramerHistory';
-import FramerSettings from './pages/FramerSettings';
 import { Loader2 } from 'lucide-react';
+
+const Landing = lazy(() => import('./pages/Landing'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const FramerDashboard = lazy(() => import('./pages/FramerDashboard'));
+const FramerTenants = lazy(() => import('./pages/FramerTenants'));
+const FramerUsage = lazy(() => import('./pages/FramerUsage'));
+const FramerHistory = lazy(() => import('./pages/FramerHistory'));
+const FramerSettings = lazy(() => import('./pages/FramerSettings'));
+
+const PageFallback = () => (
+  <div className="min-h-[50vh] flex items-center justify-center">
+    <Loader2 className="w-6 h-6 animate-spin text-[#4D7C0F]" />
+  </div>
+);
 
 /**
  * PublicRoute — only renders children when the user is NOT authenticated.
@@ -38,26 +46,28 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <Routes>
-          {/* Public-only routes — authenticated users are redirected to /dashboard */}
-          <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
-          <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              {/* Public-only routes — authenticated users are redirected to /dashboard */}
+              <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
+              <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
 
-          {/* Authenticated Dashboard Routes */}
-          <Route element={<ProtectedRoute />}>
-            <Route path="/dashboard" element={<FramerLayout />}>
-              <Route index element={<FramerDashboard />} />
-              <Route path="tenants" element={<FramerTenants />} />
-              <Route path="usage" element={<FramerUsage />} />
-              <Route path="history" element={<FramerHistory />} />
-              <Route path="settings" element={<FramerSettings />} />
-            </Route>
-          </Route>
+                  {/* Authenticated Dashboard Routes */}
+                  <Route element={<ProtectedRoute />}>
+                    <Route path="/dashboard" element={<FramerLayout />}>
+                      <Route index element={<FramerDashboard />} />
+                      <Route path="tenants" element={<FramerTenants />} />
+                      <Route path="usage" element={<FramerUsage />} />
+                      <Route path="history" element={<FramerHistory />} />
+                      <Route path="settings" element={<FramerSettings />} />
+                    </Route>
+                  </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </Router>
-    </AuthProvider>
+      </Suspense>
+    </Router>
+    </AuthProvider >
   );
 }
 

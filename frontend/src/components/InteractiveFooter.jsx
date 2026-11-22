@@ -7,30 +7,30 @@ const FOOTER_COLUMNS = [
     title: 'PRODUCT',
     links: [
       { name: 'Usage Metering', href: '#define' },
-      { name: 'Entitlements', href: '#limits' },
-      { name: 'Pricing Models', href: '/dashboard' },
+      { name: 'Telemetry Tracking', href: '#track' },
+      { name: 'Quota Entitlements', href: '#limits' },
       { name: 'Billing & Invoicing', href: '/dashboard/history' },
-      { name: 'Integrations', href: '/dashboard/settings' }
+      { name: 'Tenant Settings', href: '/dashboard/settings' }
     ]
   },
   {
     title: 'DEVELOPERS',
     links: [
-      { name: 'Quickstart', href: '/dashboard' },
-      { name: 'API Reference', href: '/dashboard' },
-      { name: 'SDKs', href: '/dashboard' },
-      { name: 'Webhooks', href: '/dashboard/settings' },
-      { name: 'Changelog', href: '/dashboard' }
+      { name: 'Quickstart Guide', href: '#define' },
+      { name: 'Telemetry API', href: '#track' },
+      { name: 'Auth0 & RBAC', href: '#limits' },
+      { name: 'Stripe Webhooks', href: '/dashboard/settings' },
+      { name: 'Platform Status', href: '/api/health' }
     ]
   },
   {
-    title: 'COMPANY',
+    title: 'PLATFORM',
     links: [
-      { name: 'About', href: '/dashboard' },
-      { name: 'Security', href: '/dashboard' },
-      { name: 'Contact', href: '/dashboard' },
-      { name: 'Blog', href: '/dashboard' },
-      { name: 'Careers', href: '/dashboard' }
+      { name: 'Financial Engine', href: '#top' },
+      { name: 'Multi-Tenant Isolation', href: '/dashboard/tenants' },
+      { name: 'Usage Analytics', href: '/dashboard/usage' },
+      { name: 'Billing Portal', href: '/dashboard/history' },
+      { name: 'Security Overview', href: '#limits' }
     ]
   }
 ];
