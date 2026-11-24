@@ -1,5 +1,6 @@
 const pool = require('../config/database');
 const meterService = require('../services/meterService');
+const pricingService = require('../services/pricingService');
 const { calculateAPICallCost, calculateAITokenCost } = require('../config/pricing');
 
 class AdminController {
@@ -373,6 +374,155 @@ class AdminController {
     } catch (error) {
       console.error('Error fetching real-time usage:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  /**
+   * Get all plans with database quotas and pricing
+   * GET /api/admin/plans
+   */
+  async getPlans(req, res) {
+    try {
+      const result = await pool.query('SELECT * FROM plans ORDER BY id ASC');
+      res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error('Error fetching plans:', error);
+      res.status(500).json({ error: 'Failed to fetch plans' });
+    }
+  }
+
+  /**
+   * Update plan quotas or base price
+   * PUT /api/admin/plans/:id
+   */
+  async updatePlan(req, res) {
+    try {
+      const { id } = req.params;
+      const { api_calls_limit, ai_tokens_limit, allow_overage, base_price_cents } = req.body;
+
+      const updates = [];
+      const values = [];
+      let idx = 1;
+
+      if (api_calls_limit !== undefined) {
+        updates.push(`api_calls_limit = $${idx++}`);
+        values.push(parseInt(api_calls_limit, 10));
+      }
+      if (ai_tokens_limit !== undefined) {
+        updates.push(`ai_tokens_limit = $${idx++}`);
+        values.push(parseInt(ai_tokens_limit, 10));
+      }
+      if (allow_overage !== undefined) {
+        updates.push(`allow_overage = $${idx++}`);
+        values.push(Boolean(allow_overage));
+      }
+      if (base_price_cents !== undefined) {
+        updates.push(`base_price_cents = $${idx++}`);
+        values.push(parseInt(base_price_cents, 10));
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: 'No fields provided to update' });
+      }
+
+      values.push(id);
+      const query = `
+        UPDATE plans
+        SET ${updates.join(', ')}
+        WHERE id = $${idx}
+        RETURNING *
+      `;
+
+      const result = await pool.query(query, values);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Plan not found' });
+      }
+
+      pricingService.invalidateCache();
+
+      res.status(200).json({ success: true, plan: result.rows[0] });
+    } catch (error) {
+      console.error('Error updating plan:', error);
+      res.status(500).json({ error: 'Failed to update plan' });
+    }
+  }
+
+  /**
+   * Get all active and inactive pricing rules
+   * GET /api/admin/pricing-rules
+   */
+  async getPricingRules(req, res) {
+    try {
+      const result = await pool.query(`
+        SELECT * FROM pricing_rules 
+        ORDER BY category, tier_min_units ASC NULLS LAST, rule_key ASC
+      `);
+      res.status(200).json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error('Error fetching pricing rules:', error);
+      res.status(500).json({ error: 'Failed to fetch pricing rules' });
+    }
+  }
+
+  /**
+   * Update a pricing rule
+   * PUT /api/admin/pricing-rules/:id
+   */
+  async updatePricingRule(req, res) {
+    try {
+      const { id } = req.params;
+      const { rate_cents, unit_multiplier, tier_min_units, tier_max_units, is_active } = req.body;
+
+      const updates = [];
+      const values = [];
+      let idx = 1;
+
+      if (rate_cents !== undefined) {
+        updates.push(`rate_cents = $${idx++}`);
+        values.push(parseFloat(rate_cents));
+      }
+      if (unit_multiplier !== undefined) {
+        updates.push(`unit_multiplier = $${idx++}`);
+        values.push(parseFloat(unit_multiplier));
+      }
+      if (tier_min_units !== undefined) {
+        updates.push(`tier_min_units = $${idx++}`);
+        values.push(tier_min_units === null ? null : parseInt(tier_min_units, 10));
+      }
+      if (tier_max_units !== undefined) {
+        updates.push(`tier_max_units = $${idx++}`);
+        values.push(tier_max_units === null ? null : parseInt(tier_max_units, 10));
+      }
+      if (is_active !== undefined) {
+        updates.push(`is_active = $${idx++}`);
+        values.push(Boolean(is_active));
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: 'No fields provided to update' });
+      }
+
+      updates.push(`updated_at = CURRENT_TIMESTAMP`);
+      values.push(id);
+
+      const query = `
+        UPDATE pricing_rules
+        SET ${updates.join(', ')}
+        WHERE id = $${idx}
+        RETURNING *
+      `;
+
+      const result = await pool.query(query, values);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Pricing rule not found' });
+      }
+
+      pricingService.invalidateCache();
+
+      res.status(200).json({ success: true, rule: result.rows[0] });
+    } catch (error) {
+      console.error('Error updating pricing rule:', error);
+      res.status(500).json({ error: 'Failed to update pricing rule' });
     }
   }
 }

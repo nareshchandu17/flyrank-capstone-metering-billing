@@ -4,7 +4,8 @@ const {
   PRICING_CONFIG, 
   calculateAPICallCost, 
   calculateAITokenCost, 
-  calculateAITokenCostMicroCents 
+  calculateAITokenCostMicroCents,
+  calculateTokenCost
 } = require('../config/pricing');
 
 class MeterService {
@@ -428,10 +429,10 @@ class MeterService {
         ai_tokens_cents_exact: aiTokenExactCents,
         ai_tokens_micro_cents: aiTokenMicroCents,
         token_breakdown_cents: {
-          input: (inputTokens * PRICING_CONFIG.ai_tokens.input_tokens.cost_per_million) / 1000000,
-          cached_input: (cachedInputTokens * PRICING_CONFIG.ai_tokens.cached_input_tokens.cost_per_million) / 1000000,
-          output: (outputTokens * PRICING_CONFIG.ai_tokens.output_tokens.cost_per_million) / 1000000,
-          reasoning: (reasoningTokens * PRICING_CONFIG.ai_tokens.reasoning_tokens.cost_per_million) / 1000000
+          input: calculateTokenCost('input', inputTokens, { exact: true }),
+          cached_input: calculateTokenCost('cached_input', cachedInputTokens, { exact: true }),
+          output: calculateTokenCost('output', outputTokens, { exact: true }),
+          reasoning: calculateTokenCost('reasoning', reasoningTokens, { exact: true })
         },
         total_cents: totalCents,
         total_dollars: totalDollars,

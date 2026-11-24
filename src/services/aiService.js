@@ -72,8 +72,12 @@ class AIService {
    */
   async callGemini(prompt, options, startTime) {
         const apiKey = process.env.GEMINI_API_KEY;
-        const model = options.model || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const model = options.model || process.env.GEMINI_MODEL;
+        if (!model && process.env.NODE_ENV === 'production') {
+          throw new Error('Production configuration error: GEMINI_MODEL must be set in environment variables when GEMINI_API_KEY is active.');
+        }
+        const selectedModel = model || 'gemini-1.5-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
 
         const response = await fetch(url, {
           method: 'POST',
@@ -123,7 +127,11 @@ class AIService {
    */
   async callGroq(prompt, options, startTime) {
         const apiKey = process.env.GROQ_API_KEY;
-        const model = options.model || process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+        const model = options.model || process.env.GROQ_MODEL;
+        if (!model && process.env.NODE_ENV === 'production') {
+          throw new Error('Production configuration error: GROQ_MODEL must be set in environment variables when GROQ_API_KEY is active.');
+        }
+        const selectedModel = model || 'openai/gpt-oss-120b';
         const url = 'https://api.groq.com/openai/v1/chat/completions';
 
         const response = await fetch(url, {

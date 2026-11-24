@@ -133,7 +133,16 @@ export const getDashboardStats = async (tenantId) => {
 export const getTenants = async () => {
   try {
     const response = await api.get('/tenants');
-    return response.data.tenants || response.data || [];
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    if (response.data && Array.isArray(response.data.data)) {
+      return response.data.data;
+    }
+    if (response.data && Array.isArray(response.data.tenants)) {
+      return response.data.tenants;
+    }
+    return [];
   } catch (err) {
     if (err.response?.status === 403 || err.response?.status === 401) {
       try {
@@ -411,33 +420,23 @@ export const getAuditLogs = async (tenantId) => {
 };
 
 // Client Settings (theme, alert preferences) - completely removed hardcoded admin credentials
+let inMemorySettings = {
+  alertThresholdPercent: 80,
+  criticalThresholdPercent: 100,
+  stripePricePro: '',
+  stripePriceFree: '',
+  autoReconcile: true,
+  currency: 'USD',
+  pollIntervalSeconds: 30,
+  webhookNotifications: true
+};
+
 export const getSettings = () => {
-  const defaults = {
-    alertThresholdPercent: 80,
-    criticalThresholdPercent: 100,
-    stripePricePro: '',
-    stripePriceFree: '',
-    autoReconcile: true,
-    currency: 'USD',
-    pollIntervalSeconds: 30,
-    webhookNotifications: true
-  };
-
-  try {
-    const saved = localStorage.getItem('usage_metering_settings');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return { ...defaults, ...parsed };
-    }
-  } catch {
-    // Fallback on defaults if JSON parsing fails
-  }
-
-  return defaults;
+  return { ...inMemorySettings };
 };
 
 export const saveSettings = (newSettings) => {
-  localStorage.setItem('usage_metering_settings', JSON.stringify(newSettings));
+  inMemorySettings = { ...inMemorySettings, ...newSettings };
   return { success: true, message: 'Settings saved successfully' };
 };
 

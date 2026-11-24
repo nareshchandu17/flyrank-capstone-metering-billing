@@ -22,8 +22,8 @@ const FramerSettings = () => {
   const [settings, setSettings] = useState({
     alertThresholdPercent: 80,
     criticalThresholdPercent: 100,
-    stripePricePro: 'price_pro_plan_id',
-    stripePriceFree: 'price_free_plan_id',
+    stripePricePro: '',
+    stripePriceFree: '',
     autoReconcile: true,
     currency: 'USD',
     pollIntervalSeconds: 30
@@ -74,8 +74,8 @@ const FramerSettings = () => {
     const defaults = {
       alertThresholdPercent: 80,
       criticalThresholdPercent: 100,
-      stripePricePro: 'price_pro_plan_id',
-      stripePriceFree: 'price_free_plan_id',
+      stripePricePro: '',
+      stripePriceFree: '',
       autoReconcile: true,
       currency: 'USD',
       pollIntervalSeconds: 30

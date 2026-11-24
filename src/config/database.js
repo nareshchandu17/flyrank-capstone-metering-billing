@@ -4,6 +4,15 @@ require('dotenv').config();
 const isProduction = process.env.NODE_ENV === 'production';
 const hasDatabaseUrl = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim().length > 0);
 
+// In production, reject unconfigured database credentials — never silently fall back to localhost defaults
+if (isProduction && !hasDatabaseUrl && (!process.env.DB_HOST || !process.env.DB_PASSWORD)) {
+  const errMsg = 'FATAL CONFIGURATION ERROR: Missing required database configuration in production. Set DATABASE_URL or explicit (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME).';
+  console.error('\n' + '='.repeat(80));
+  console.error(errMsg);
+  console.error('='.repeat(80) + '\n');
+  throw new Error(errMsg);
+}
+
 // Determine SSL requirements: enabled if DB_SSL=true or if production cloud database (e.g. Supabase, RDS, Neon)
 const useSsl = process.env.DB_SSL === 'true' || 
   (hasDatabaseUrl && !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1'));

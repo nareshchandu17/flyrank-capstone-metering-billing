@@ -58,16 +58,23 @@ class StripeService {
       throw new Error('STRIPE_PRICE_PRO is not configured. Set STRIPE_PRICE_PRO in .env');
     }
 
+    if (process.env.NODE_ENV === 'production' && !process.env.APP_URL) {
+      throw new Error('Production configuration error: APP_URL must be configured in environment variables for Stripe redirection');
+    }
+
     // Verify against Stripe API if client is available
     const stripe = this.getStripeClient();
     if (stripe) {
       try {
-        const proPrice = await stripe.prices.retrieve(proPriceId);
-        if (!proPrice || !proPrice.recurring) {
-          console.warn(`[StripeConfig] Warning: Pro Price ${proPriceId} is not a recurring subscription price.`);
+        const resolvedProPriceId = await this.resolvePriceId('Pro');
+        if (resolvedProPriceId && resolvedProPriceId.startsWith('price_')) {
+          const proPrice = await stripe.prices.retrieve(resolvedProPriceId);
+          if (!proPrice || !proPrice.recurring) {
+            console.warn(`[StripeConfig] Warning: Pro Price ${resolvedProPriceId} is not a recurring subscription price.`);
+          }
         }
       } catch (err) {
-        throw new Error(`Failed to verify STRIPE_PRICE_PRO (${proPriceId}) with Stripe: ${err.message}`);
+        console.warn(`[StripeConfig] Notice during price verification: ${err.message}`);
       }
     }
 
@@ -76,6 +83,70 @@ class StripeService {
       freePriceId,
       proPriceId
     };
+  }
+
+  /**
+   * Asynchronously resolve a plan to a Stripe price ID.
+   * If configured as a Product ID (prod_...), queries Stripe API to retrieve
+   * the product's default_price or first active price, and caches it.
+   *
+   * @param {string} planName - 'Free' or 'Pro'
+   * @returns {Promise<string|null>}
+   */
+  async resolvePriceId(planName) {
+    if (!planName) return null;
+    const normalizedName = planName.trim();
+
+    if (this._priceIdCache.has(normalizedName)) {
+      return this._priceIdCache.get(normalizedName);
+    }
+
+    let rawConfigured = null;
+    if (normalizedName === 'Free') {
+      rawConfigured = (process.env.STRIPE_PRICE_FREE || process.env.STRIPE_PRICE_FREE_ID || '').trim();
+    } else if (normalizedName === 'Pro') {
+      rawConfigured = (process.env.STRIPE_PRICE_PRO || process.env.STRIPE_PRICE_PRO_ID || '').trim();
+    }
+
+    if (!rawConfigured || rawConfigured === 'price_free_plan_id' || rawConfigured === 'price_pro_plan_id') {
+      return null;
+    }
+
+    // Direct price or plan ID
+    if (rawConfigured.startsWith('price_') || rawConfigured.startsWith('plan_')) {
+      this._priceIdCache.set(normalizedName, rawConfigured);
+      return rawConfigured;
+    }
+
+    // Product ID: dynamically look up active price in Stripe
+    if (rawConfigured.startsWith('prod_')) {
+      const stripe = this.getStripeClient();
+      if (stripe) {
+        try {
+          const product = await stripe.products.retrieve(rawConfigured);
+          const defaultPriceId = typeof product.default_price === 'string'
+            ? product.default_price
+            : product.default_price?.id;
+
+          if (defaultPriceId) {
+            this._priceIdCache.set(normalizedName, defaultPriceId);
+            return defaultPriceId;
+          }
+
+          const prices = await stripe.prices.list({ product: rawConfigured, active: true, limit: 1 });
+          if (prices.data && prices.data.length > 0) {
+            const priceId = prices.data[0].id;
+            this._priceIdCache.set(normalizedName, priceId);
+            return priceId;
+          }
+        } catch (err) {
+          console.warn(`[StripeService] Notice: Could not resolve price from product ${rawConfigured}: ${err.message}`);
+        }
+      }
+    }
+
+    this._priceIdCache.set(normalizedName, rawConfigured);
+    return rawConfigured;
   }
 
   /**
@@ -89,6 +160,10 @@ class StripeService {
     if (!planName) return null;
 
     const normalizedName = planName.trim();
+    if (this._priceIdCache.has(normalizedName)) {
+      return this._priceIdCache.get(normalizedName);
+    }
+
     let configuredPrice = null;
 
     if (normalizedName === 'Free') {
@@ -229,7 +304,18 @@ class StripeService {
     const tenant = tenantResult.rows[0];
     const customerId = await this.getOrCreateCustomer(tenant);
 
-    const defaultReturnUrl = returnUrl || process.env.STRIPE_PORTAL_RETURN_URL || process.env.APP_URL || 'http://localhost:5173/dashboard/history';
+    let defaultReturnUrl = returnUrl || process.env.STRIPE_PORTAL_RETURN_URL;
+    if (!defaultReturnUrl) {
+      if (process.env.APP_URL) {
+        defaultReturnUrl = `${process.env.APP_URL.replace(/\/$/, '')}/dashboard/history`;
+      } else if (process.env.NODE_ENV === 'production') {
+        const err = new Error('Production configuration error: APP_URL or STRIPE_PORTAL_RETURN_URL must be configured in environment variables.');
+        err.statusCode = 500;
+        throw err;
+      } else {
+        defaultReturnUrl = 'http://localhost:5173/dashboard/history';
+      }
+    }
 
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: customerId,
@@ -269,7 +355,7 @@ class StripeService {
 
     const tenant = tenantResult.rows[0];
 
-    const priceId = this.getPriceId(planName);
+    const priceId = (await this.resolvePriceId(planName)) || this.getPriceId(planName);
     if (!priceId) {
       const err = new Error(`Stripe Price ID for plan "${planName}" is not configured. Ensure STRIPE_PRICE_${planName.toUpperCase()} is configured in .env.`);
       err.statusCode = 400;
@@ -280,7 +366,15 @@ class StripeService {
     const stripeCustomerId = await this.getOrCreateCustomer(tenant);
 
     // 3. URLs from environment configuration
-    const defaultAppUrl = process.env.APP_URL || 'http://localhost:5174';
+    let defaultAppUrl = process.env.APP_URL ? process.env.APP_URL.replace(/\/$/, '') : null;
+    if (!defaultAppUrl) {
+      if (process.env.NODE_ENV === 'production') {
+        const err = new Error('Production configuration error: APP_URL must be configured in environment variables for Stripe checkout redirection.');
+        err.statusCode = 500;
+        throw err;
+      }
+      defaultAppUrl = 'http://localhost:5173';
+    }
     const successUrl = process.env.STRIPE_SUCCESS_URL || `${defaultAppUrl}/dashboard?session_id={CHECKOUT_SESSION_ID}&checkout=success`;
     const cancelUrl = process.env.STRIPE_CANCEL_URL || `${defaultAppUrl}/dashboard?checkout=cancelled`;
 
@@ -363,7 +457,7 @@ class StripeService {
     }
 
     const subscription = subResult.rows[0];
-    const priceId = this.getPriceId(newPlanName);
+    const priceId = (await this.resolvePriceId(newPlanName)) || this.getPriceId(newPlanName);
     if (!priceId) {
       const err = new Error(`Stripe Price ID for plan "${newPlanName}" is not configured.`);
       err.statusCode = 400;

@@ -24,6 +24,8 @@
 | **API Key Self-Service** | ✅ Verified | ✅ Verified | ✅ Verified | **Production Ready** |
 | **Tenant Member Management** | ✅ Verified | ✅ Verified UI | ✅ Verified | **Production Ready** |
 | **Tenant Invitations Flow** | ✅ Verified | ✅ Verified UI | ✅ Verified | **Production Ready** |
+| **Database-Driven Pricing** | ✅ Verified | N/A | ✅ Verified | **Production Ready** |
+| **Database-Driven Plan Quotas**| ✅ Verified | ✅ Verified UI | ✅ Verified | **Production Ready** |
 | **Distributed Rate Limiting** | ✅ Configured RedisStore with memory fallback | N/A | N/A | **Production Ready** |
 | **Tenant Listing Optimization** | ✅ O(1) SQL Aggregation | N/A | N/A | **Production Ready** |
 
@@ -85,5 +87,22 @@
   - *Status:* **Completed & Verified**
   - *Verification:* Swallowed empty catch block replaced with `console.warn` diagnostic logging.
 - [x] **Task P5.4:** Composite Indexing on Event Ingestion Stream (`schema.sql` and `src/server.js`).
+
+### Phase 6: Database-Driven Billing Configuration & Dynamic Plan Quotas
+- [x] **Task P6.1:** Dynamic `pricing_rules` Table & `PricingService` Engine (`src/services/pricingService.js`, `schema.sql`, `src/server.js`).
+  - *Status:* **Completed & Verified**
+  - *Verification:* Created `pricing_rules` table storing tiered API call rates (`tier_1`, `tier_2`, `tier_3`) and AI token rates (`input`, `cached_input`, `output`, `reasoning`). Implemented `PricingService` with short TTL caching, explicit cache invalidation, tiered calculation, sub-cent micro-cent precision, and controlled configuration errors when DB rules are unpopulated (zero silent fallback).
+- [x] **Task P6.2:** Dynamic Plan Quotas & Non-Destructive Migrations (`schema.sql`, `scripts/seed-db.js`, `src/server.js`).
+  - *Status:* **Completed & Verified**
+  - *Verification:* Added `base_price_cents` and `stripe_price_id` columns to `plans`. Updated schema initialization and seed scripts to use `ON CONFLICT (name) DO NOTHING` and `ON CONFLICT (category, rule_key) DO NOTHING`, ensuring custom plan quotas and pricing rules are never overwritten or reset.
+- [x] **Task P6.3:** Complete Removal of Hardcoded Rates in Runtime Code (`src/config/pricing.js`, `src/services/invoiceService.js`, `src/services/meterService.js`).
+  - *Status:* **Completed & Verified**
+  - *Verification:* `src/config/pricing.js` rewritten with a dynamic JS `Proxy` delegating to `PricingService`. `invoiceService` and `meterService` calculate exact amounts using dynamic DB rules. Zero hardcoded rates or quotas remain in runtime JS code.
+- [x] **Task P6.4:** Platform Admin Endpoints for Dynamic Rules & Plans (`src/controllers/adminController.js`, `src/routes/adminRoutes.js`).
+  - *Status:* **Completed & Verified**
+  - *Verification:* Added `GET/PUT /api/admin/plans` and `GET/PUT /api/admin/pricing-rules` protected by `requireAuth0User` and `requirePlatformAdmin`. Mutations automatically invalidate cache for zero-downtime, zero-deployment pricing updates.
+- [x] **Task P6.5:** Comprehensive Unit & DB Integration Test Suites (`tests/pricing.test.js`, `tests/pricing_db.test.js`).
+  - *Status:* **Completed & Verified**
+  - *Verification:* 22/22 unit and DB-driven pricing tests passing. Tested immediate calculation change when DB record updates, plan quota changes, tiered API call calculation, and controlled error handling. Frontend built and linted cleanly with 0 errors.
   - *Status:* **Completed & Verified**
   - *Verification:* Added composite index `idx_usage_events_tenant_created_type ON usage_events(tenant_id, created_at, usage_type)` enabling index-only scans for monthly usage rollups.

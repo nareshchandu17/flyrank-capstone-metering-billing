@@ -19,6 +19,14 @@ router.get('/metrics', adminController.getMetrics);
 router.get('/usage/history', adminController.getUsageHistory);
 router.get('/usage/realtime', adminController.getRealTimeUsage);
 
+// Dynamic Plans & Quotas Management (Platform Admin Only)
+router.get('/plans', adminController.getPlans);
+router.put('/plans/:id', adminController.updatePlan);
+
+// Dynamic Pricing Rules Management (Platform Admin Only)
+router.get('/pricing-rules', adminController.getPricingRules);
+router.put('/pricing-rules/:id', adminController.updatePricingRule);
+
 // Global Audit Logs (Platform Admin Only)
 router.get('/audit-logs', authController.getAuditLogs);
 

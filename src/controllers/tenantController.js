@@ -104,7 +104,7 @@ const getAllTenants = async (req, res) => {
       };
     });
 
-    res.json({ success: true, data: enrichedTenants });
+    res.json({ success: true, data: enrichedTenants, tenants: enrichedTenants });
   } catch (error) {
     console.error('Error fetching tenants:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch tenants' });

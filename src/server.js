@@ -1,16 +1,22 @@
 require('dotenv').config();
 
-// Validate critical Auth0 configuration during production startup
+// Validate critical environment configurations during production startup
 if (process.env.NODE_ENV === 'production') {
   const missing = [];
   if (!process.env.AUTH0_DOMAIN && !process.env.AUTH0_ISSUER_BASE_URL) missing.push('AUTH0_DOMAIN or AUTH0_ISSUER_BASE_URL');
   if (!process.env.AUTH0_AUDIENCE) missing.push('AUTH0_AUDIENCE');
+  if (!process.env.DATABASE_URL && (!process.env.DB_HOST || !process.env.DB_PASSWORD)) missing.push('DATABASE_URL or explicit (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME)');
+  if (process.env.STRIPE_SECRET_KEY && !process.env.APP_URL) missing.push('APP_URL (required for Stripe production checkout & portal redirections)');
+  if (process.env.GEMINI_API_KEY && !process.env.GEMINI_MODEL) missing.push('GEMINI_MODEL (required when GEMINI_API_KEY is configured)');
+  if (process.env.GROQ_API_KEY && !process.env.GROQ_MODEL) missing.push('GROQ_MODEL (required when GROQ_API_KEY is configured)');
+
   if (missing.length > 0) {
-    console.error('\n' + '='.repeat(70));
-    console.error(`FATAL CONFIGURATION ERROR: Missing required Auth0 settings in production: ${missing.join(', ')}`);
-    console.error('The server refuses to start without verified Auth0 identity configuration.');
-    console.error('='.repeat(70) + '\n');
-    throw new Error(`Auth0 configuration missing in production: ${missing.join(', ')}`);
+    console.error('\n' + '='.repeat(80));
+    console.error(`FATAL CONFIGURATION ERROR: Missing required environment settings in production:`);
+    missing.forEach(item => console.error(` - ${item}`));
+    console.error('The server refuses to start with unconfigured production fallbacks.');
+    console.error('='.repeat(80) + '\n');
+    throw new Error(`Environment configuration missing in production: ${missing.join(', ')}`);
   }
 }
 
@@ -19,6 +25,7 @@ const pool = require('./config/database');
 const invoiceJob = require('./jobs/invoiceJob');
 const reconcileJob = require('./jobs/reconcileJob');
 const stripeService = require('./services/stripeService');
+const pricingService = require('./services/pricingService');
 
 const PORT = process.env.PORT || 3000;
 
@@ -33,6 +40,8 @@ async function initializeDatabase() {
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
       ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
+      ALTER TABLE plans ADD COLUMN IF NOT EXISTS base_price_cents INTEGER DEFAULT 0;
+      ALTER TABLE plans ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(255);
       ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
       ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
       ALTER TABLE usage_alerts ADD COLUMN IF NOT EXISTS metric_type VARCHAR(50) NOT NULL DEFAULT 'api_call';
@@ -41,6 +50,25 @@ async function initializeDatabase() {
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS hosted_invoice_url TEXT;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_pdf TEXT;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
+
+      CREATE TABLE IF NOT EXISTS pricing_rules (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          category VARCHAR(50) NOT NULL,
+          rule_key VARCHAR(50) NOT NULL,
+          name VARCHAR(100) NOT NULL,
+          rate_cents NUMERIC(14, 6) NOT NULL,
+          billing_unit VARCHAR(50) NOT NULL,
+          unit_multiplier NUMERIC(14, 2) NOT NULL DEFAULT 1.0,
+          tier_min_units BIGINT DEFAULT 0,
+          tier_max_units BIGINT DEFAULT NULL,
+          currency VARCHAR(10) NOT NULL DEFAULT 'usd',
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          metadata JSONB DEFAULT '{}'::jsonb,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uq_pricing_rules_category_key UNIQUE (category, rule_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pricing_rules_active ON pricing_rules(category, is_active);
 
       CREATE TABLE IF NOT EXISTS webhook_events (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -156,7 +184,20 @@ let server;
 async function startServer() {
   await initializeDatabase();
 
-    server = app.listen(PORT, () => {
+  // Load database-driven dynamic pricing rules and plan configurations
+  try {
+    await pricingService.loadPricingRules(pool);
+    await pricingService.loadPlans(pool);
+    console.log('✅ Pricing & Plans: Database rules loaded successfully');
+  } catch (err) {
+    console.error('❌ Pricing Configuration Error: Failed to load database pricing rules:', err.message);
+    // In production, exit if dynamic rules cannot be loaded
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    }
+  }
+
+  server = app.listen(PORT, () => {
       console.log('='.repeat(60));
       console.log('🚀 Usage Metering & Billing Engine - Backend Server');
       console.log('='.repeat(60));

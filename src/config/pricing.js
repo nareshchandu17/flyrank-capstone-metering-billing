@@ -1,169 +1,89 @@
 /**
- * AI Token Pricing Configuration
- * Based on real-world AI pricing rules
- * Standard prices are in cents per 1M tokens.
- * Sub-cent calculations use micro-cents (1 cent = 10,000 micro-cents, 1 dollar = 1,000,000 micro-cents)
- * to avoid repeatedly rounding small token usage down to zero.
+ * Database-Driven Pricing Configuration & Calculation Helpers
+ * 
+ * Rates and quotas are dynamically sourced from PostgreSQL via PricingService.
+ * No hardcoded pricing constants or plan limits exist in runtime source code.
  */
 
-const PRICING_CONFIG = {
-  // API call pricing (per call)
-  api_call: {
-    cost_per_call: 1, // 1 cent per API call
-  },
-  
-  // AI token pricing (per 1M tokens, in cents)
-  ai_tokens: {
-    // Input tokens ($0.30 per 1M tokens = 30 cents)
-    input_tokens: {
-      cost_per_million: 30,
-    },
-    
-    // Cached input tokens ($0.10 per 1M cached input tokens = 10 cents)
-    cached_input_tokens: {
-      cost_per_million: 10,
-    },
-    
-    // Output tokens ($0.60 per 1M output tokens = 60 cents)
-    output_tokens: {
-      cost_per_million: 60,
-    },
-    
-    // Reasoning tokens ($0.60 per 1M reasoning tokens = 60 cents, counted as output)
-    reasoning_tokens: {
-      cost_per_million: 60,
-    },
-  },
+const pricingService = require('../services/pricingService');
 
-  // Plan pricing & limits
-  plans: {
-    Free: {
-      name: 'Free',
-      base_price_cents: 0,
-      api_calls_limit: 1000,
-      ai_tokens_limit: 100000,
-      allow_overage: false,
-    },
-    Pro: {
-      name: 'Pro',
-      base_price_cents: 2900, // $29.00 / month
-      api_calls_limit: 10000,
-      ai_tokens_limit: 1000000,
-      allow_overage: true,
-    },
-    Enterprise: {
-      name: 'Enterprise',
-      base_price_cents: 29900, // $299.00 / month
-      api_calls_limit: 1000000,
-      ai_tokens_limit: 50000000,
-      allow_overage: true,
-    },
-  },
-};
+// Dynamic Proxy reflecting live database-backed pricing rules and plans
+const PRICING_CONFIG = new Proxy({}, {
+  get(target, prop) {
+    if (prop === 'api_call') {
+      const rules = pricingService.getCachedRules('api_call');
+      const firstTier = rules[0] || { rate_cents: 1, unit_multiplier: 1 };
+      const rate = Number(firstTier.rate_cents);
+      const mult = pricingService.getUnitMultiplier(firstTier);
+      return {
+        cost_per_call: Math.round(rate / mult),
+      };
+    }
+
+    if (prop === 'ai_tokens') {
+      const getRatePerMillion = (key) => {
+        const rule = pricingService.findTokenRule(key);
+        const rate = Number(rule.rate_cents);
+        const mult = pricingService.getUnitMultiplier(rule);
+        return (rate * 1000000) / mult;
+      };
+
+      return {
+        input_tokens: { cost_per_million: getRatePerMillion('input') },
+        cached_input_tokens: { cost_per_million: getRatePerMillion('cached_input') },
+        output_tokens: { cost_per_million: getRatePerMillion('output') },
+        reasoning_tokens: { cost_per_million: getRatePerMillion('reasoning') },
+      };
+    }
+
+    if (prop === 'plans') {
+      return new Proxy({}, {
+        get(_, planName) {
+          if (typeof planName === 'string') {
+            return pricingService.getCachedPlan(planName);
+          }
+          return undefined;
+        }
+      });
+    }
+
+    return undefined;
+  }
+});
 
 /**
- * Calculate cost for AI tokens in micro-cents (integer arithmetic, no precision loss)
- * 1 cent = 10,000 micro-cents
- * @param {string} tokenType - Type of tokens
- * @param {number} quantity - Number of tokens
- * @returns {number} - Cost in micro-cents
+ * Calculate cost for AI tokens in micro-cents (1 cent = 10,000 micro-cents)
  */
-function calculateTokenCostMicroCents(tokenType, quantity) {
-  const pricing = PRICING_CONFIG.ai_tokens[tokenType];
-  if (!pricing) {
-    throw new Error(`Unknown token type: ${tokenType}`);
-  }
-
-  // (quantity * cost_per_million * 10,000) / 1,000,000 = (quantity * cost_per_million) / 100
-  return Math.round((quantity * pricing.cost_per_million * 10000) / 1000000);
+function calculateTokenCostMicroCents(tokenType, quantity, rules = null) {
+  return pricingService.calculateTokenCostMicroCents(tokenType, quantity, rules);
 }
 
 /**
  * Calculate cost for AI tokens based on type and quantity
- * @param {string} tokenType - Type of tokens (input_tokens, cached_input_tokens, output_tokens, reasoning_tokens)
- * @param {number} quantity - Number of tokens
- * @param {Object} options - { exact: boolean } if true returns precise float cents, else rounded integer cents
- * @returns {number} - Cost in cents
  */
-function calculateTokenCost(tokenType, quantity, options = {}) {
-  const pricing = PRICING_CONFIG.ai_tokens[tokenType];
-  if (!pricing) {
-    throw new Error(`Unknown token type: ${tokenType}`);
-  }
-  
-  const exactCents = (quantity * pricing.cost_per_million) / 1000000;
-  if (options.exact) {
-    return exactCents;
-  }
-  
-  // For small non-zero tokens, avoid rounding down to 0 if callers need ceil or nearest round
-  return Math.round(exactCents);
+function calculateTokenCost(tokenType, quantity, options = {}, rules = null) {
+  return pricingService.calculateTokenCost(tokenType, quantity, options, rules);
 }
 
 /**
  * Calculate total cost for AI token usage with exact sub-cent accumulation
- * @param {Object} tokenUsage - Object with token counts by type
- * @param {Object} options - { exact: boolean }
- * @returns {number} - Total cost in cents
  */
-function calculateAITokenCost(tokenUsage, options = {}) {
-  let totalExactCents = 0;
-  
-  // Input tokens
-  if (tokenUsage.input_tokens) {
-    totalExactCents += (tokenUsage.input_tokens * PRICING_CONFIG.ai_tokens.input_tokens.cost_per_million) / 1000000;
-  }
-  
-  // Cached input tokens (cheaper)
-  if (tokenUsage.cached_input_tokens) {
-    totalExactCents += (tokenUsage.cached_input_tokens * PRICING_CONFIG.ai_tokens.cached_input_tokens.cost_per_million) / 1000000;
-  }
-  
-  // Output tokens
-  if (tokenUsage.output_tokens) {
-    totalExactCents += (tokenUsage.output_tokens * PRICING_CONFIG.ai_tokens.output_tokens.cost_per_million) / 1000000;
-  }
-  
-  // Reasoning tokens (count as output tokens)
-  if (tokenUsage.reasoning_tokens) {
-    totalExactCents += (tokenUsage.reasoning_tokens * PRICING_CONFIG.ai_tokens.reasoning_tokens.cost_per_million) / 1000000;
-  }
-  
-  if (options.exact) {
-    return totalExactCents;
-  }
-  return Math.round(totalExactCents);
+function calculateAITokenCost(tokenUsage, options = {}, rules = null) {
+  return pricingService.calculateAITokenCost(tokenUsage, options, rules);
 }
 
 /**
- * Calculate total cost for AI token usage in integer micro-cents (1 cent = 10,000 micro-cents)
- * @param {Object} tokenUsage
- * @returns {number}
+ * Calculate total cost for AI token usage in integer micro-cents
  */
-function calculateAITokenCostMicroCents(tokenUsage) {
-  let totalMicroCents = 0;
-  if (tokenUsage.input_tokens) {
-    totalMicroCents += calculateTokenCostMicroCents('input_tokens', tokenUsage.input_tokens);
-  }
-  if (tokenUsage.cached_input_tokens) {
-    totalMicroCents += calculateTokenCostMicroCents('cached_input_tokens', tokenUsage.cached_input_tokens);
-  }
-  if (tokenUsage.output_tokens) {
-    totalMicroCents += calculateTokenCostMicroCents('output_tokens', tokenUsage.output_tokens);
-  }
-  if (tokenUsage.reasoning_tokens) {
-    totalMicroCents += calculateTokenCostMicroCents('reasoning_tokens', tokenUsage.reasoning_tokens);
-  }
-  return totalMicroCents;
+function calculateAITokenCostMicroCents(tokenUsage, rules = null) {
+  return pricingService.calculateAITokenCostMicroCents(tokenUsage, rules);
 }
 
 /**
- * Calculate cost for API calls
- * @param {number} quantity - Number of API calls
- * @returns {number} - Cost in cents (integer)
+ * Calculate cost for API calls based on database tier rules
  */
-function calculateAPICallCost(quantity) {
-  return quantity * PRICING_CONFIG.api_call.cost_per_call;
+function calculateAPICallCost(quantity, rules = null) {
+  return pricingService.calculateAPICallCost(quantity, rules);
 }
 
 /**
@@ -217,6 +137,7 @@ function getCurrentBillingPeriod() {
 
 module.exports = {
   PRICING_CONFIG,
+  pricingService,
   calculateTokenCost,
   calculateTokenCostMicroCents,
   calculateAITokenCost,

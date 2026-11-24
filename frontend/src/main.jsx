@@ -34,7 +34,7 @@ createRoot(document.getElementById('root')).render(
           redirect_uri: window.location.origin,
           audience: audience
         }}
-        cacheLocation="localstorage"
+        cacheLocation="memory"
         useRefreshTokens={true}
         onRedirectCallback={onRedirectCallback}
       >

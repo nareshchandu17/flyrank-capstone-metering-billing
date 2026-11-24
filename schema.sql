@@ -8,8 +8,28 @@ CREATE TABLE IF NOT EXISTS plans (
     api_calls_limit INTEGER NOT NULL,
     ai_tokens_limit INTEGER NOT NULL,
     allow_overage BOOLEAN DEFAULT false,
+    base_price_cents INTEGER DEFAULT 0,
+    stripe_price_id VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pricing Rules table (database-driven API call & AI token pricing)
+CREATE TABLE IF NOT EXISTS pricing_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    category VARCHAR(50) NOT NULL, -- 'api_call' or 'ai_token'
+    rule_key VARCHAR(50) NOT NULL, -- 'tier_1', 'tier_2', 'tier_3' or 'input', 'cached_input', 'output', 'reasoning'
+    tier_name VARCHAR(100),
+    rate_cents NUMERIC(14, 4) NOT NULL,
+    billing_unit BIGINT NOT NULL DEFAULT 1,
+    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    tier_min_units BIGINT DEFAULT 0,
+    tier_max_units BIGINT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pricing_rules_category_rule_key_unique UNIQUE(category, rule_key)
 );
 
 -- Tenants table
@@ -239,13 +259,29 @@ CREATE INDEX IF NOT EXISTS idx_webhook_events_status ON webhook_events(status);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
+CREATE INDEX IF NOT EXISTS idx_pricing_rules_active ON pricing_rules(category, is_active);
 
--- Insert default plans
-INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage) VALUES 
-('Free', 1000, 100000, false),
-('Pro', 10000, 1000000, true),
-('Enterprise', 1000000, 50000000, true)
-ON CONFLICT (name) DO UPDATE SET allow_overage = EXCLUDED.allow_overage;
+-- Seed initial default plans only if not present, never overwriting administrative customizations
+INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage, base_price_cents) VALUES 
+('Free', 1000, 100000, false, 0),
+('Pro', 10000, 1000000, true, 2900),
+('Enterprise', 1000000, 50000000, true, 29900)
+ON CONFLICT (name) DO NOTHING;
+
+-- Seed initial pricing rules only if not present, never overwriting administrative customizations
+INSERT INTO pricing_rules (category, rule_key, tier_name, rate_cents, billing_unit, currency, tier_min_units, tier_max_units, is_active)
+VALUES
+  -- API Calls (standard per-call rate = 1.0000 cent per 1 call)
+  ('api_call', 'tier_1', 'API Calls Tier 1', 1.0000, 1, 'USD', 0, 10000, true),
+  ('api_call', 'tier_2', 'API Calls Tier 2', 1.0000, 1, 'USD', 10001, 50000, true),
+  ('api_call', 'tier_3', 'API Calls Tier 3', 1.0000, 1, 'USD', 50001, NULL, true),
+
+  -- AI Tokens (rates in cents per 1,000,000 tokens)
+  ('ai_token', 'input', 'AI Input Tokens', 30.0000, 1000000, 'USD', 0, NULL, true),
+  ('ai_token', 'cached_input', 'AI Cached Input Tokens', 10.0000, 1000000, 'USD', 0, NULL, true),
+  ('ai_token', 'output', 'AI Output Tokens', 60.0000, 1000000, 'USD', 0, NULL, true),
+  ('ai_token', 'reasoning', 'AI Reasoning Tokens', 60.0000, 1000000, 'USD', 0, NULL, true)
+ON CONFLICT (category, rule_key) DO NOTHING;
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -259,6 +295,10 @@ $$ language 'plpgsql';
 -- Triggers for updated_at
 DROP TRIGGER IF EXISTS update_plans_updated_at ON plans;
 CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_pricing_rules_updated_at ON pricing_rules;
+CREATE TRIGGER update_pricing_rules_updated_at BEFORE UPDATE ON pricing_rules
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_tenants_updated_at ON tenants;

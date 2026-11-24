@@ -3,6 +3,7 @@ const stripeService = require('./stripeService');
 const {
   PRICING_CONFIG,
   calculateAPICallCost,
+  calculateTokenCost,
   getBillingPeriodDates,
   getCurrentBillingPeriod,
   isValidBillingPeriod,
@@ -60,8 +61,9 @@ class InvoiceService {
 
     // 2. Fetch tenant & plan details
     const tenantResult = await pool.query(
-      `SELECT t.id, t.name, t.email, t.stripe_customer_id, t.status as tenant_status,
-              p.id as plan_id, p.name as plan_name, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage
+      `SELECT t.id, t.name, t.email, t.currency, t.stripe_customer_id, t.status as tenant_status,
+              p.id as plan_id, p.name as plan_name, p.api_calls_limit, p.ai_tokens_limit, p.allow_overage,
+              p.base_price_cents
        FROM tenants t
        JOIN plans p ON t.plan_id = p.id
        WHERE t.id = $1`,
@@ -73,7 +75,7 @@ class InvoiceService {
     }
 
     const tenant = tenantResult.rows[0];
-    const planConfig = PRICING_CONFIG.plans[tenant.plan_name] || PRICING_CONFIG.plans.Free;
+    const planConfig = PRICING_CONFIG.plans[tenant.plan_name] || (PRICING_CONFIG.plans ? PRICING_CONFIG.plans.Free : {});
 
     // 3. Query usage events in the billing period
     const aggregationQuery = `
@@ -128,7 +130,9 @@ class InvoiceService {
     );
     const hasActiveStripeSub = activeSubRes.rows.length > 0;
 
-    const basePlanCents = planConfig.base_price_cents || 0;
+    const basePlanCents = (tenant.base_price_cents !== null && tenant.base_price_cents !== undefined)
+      ? Number(tenant.base_price_cents)
+      : (planConfig.base_price_cents || 0);
     const shouldIncludeBaseFee = options.includeBaseSubscriptionFee === true || (!hasActiveStripeSub && basePlanCents > 0);
 
     if (shouldIncludeBaseFee && basePlanCents > 0) {
@@ -143,17 +147,17 @@ class InvoiceService {
     const apiCallCost = calculateAPICallCost(apiCallsUsed);
     if (apiCallsUsed > 0) {
       lineItems.push({
-        description: `API Calls Usage (${apiCallsUsed.toLocaleString()} calls @ $0.01/call)`,
+        description: `API Calls Usage (${apiCallsUsed.toLocaleString()} calls)`,
         quantity: apiCallsUsed,
         amount_cents: apiCallCost
       });
     }
 
-    // AI Token components calculated accurately with micro-cent precision
-    const inputExact = (inputTokens * PRICING_CONFIG.ai_tokens.input_tokens.cost_per_million) / 1000000;
-    const cachedExact = (cachedInputTokens * PRICING_CONFIG.ai_tokens.cached_input_tokens.cost_per_million) / 1000000;
-    const outputExact = (outputTokens * PRICING_CONFIG.ai_tokens.output_tokens.cost_per_million) / 1000000;
-    const reasoningExact = (reasoningTokens * PRICING_CONFIG.ai_tokens.reasoning_tokens.cost_per_million) / 1000000;
+    // AI Token components calculated accurately with micro-cent precision from dynamic pricing rules
+    const inputExact = calculateTokenCost('input', inputTokens, { exact: true });
+    const cachedExact = calculateTokenCost('cached_input', cachedInputTokens, { exact: true });
+    const outputExact = calculateTokenCost('output', outputTokens, { exact: true });
+    const reasoningExact = calculateTokenCost('reasoning', reasoningTokens, { exact: true });
 
     const totalAiCostExact = inputExact + cachedExact + outputExact + reasoningExact;
     const totalAiCents = totalAiCostExact > 0 && totalAiCostExact < 1 ? 1 : Math.round(totalAiCostExact);

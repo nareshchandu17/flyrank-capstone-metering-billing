@@ -94,10 +94,12 @@ const FramerTenants = () => {
     try {
       setLoading(true);
       const data = await getTenants();
-      setTenants(data || []);
+      const list = Array.isArray(data) ? data : (data?.data || data?.tenants || []);
+      setTenants(list);
     } catch (error) {
       console.error('Error fetching tenants:', error);
       showToast('Failed to load tenants from server', 'error');
+      setTenants([]);
     } finally {
       setLoading(false);
     }
@@ -270,7 +272,8 @@ const FramerTenants = () => {
 
   // Fetch members and pending invitations for an organization
   const fetchMembers = useCallback(async (tenantId) => {
-    const target = tenantId || selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    const tenantList = Array.isArray(tenants) ? tenants : [];
+    const target = tenantId || selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
     if (!target) return;
     try {
       setLoadingMembers(true);
@@ -278,8 +281,8 @@ const FramerTenants = () => {
         getTenantMembers(target).catch(() => []),
         getTenantInvitations(target).catch(() => [])
       ]);
-      setMembers(Array.isArray(membersData) ? membersData : []);
-      setInvitations(Array.isArray(invitesData) ? invitesData : []);
+      setMembers(Array.isArray(membersData) ? membersData : (membersData?.data || []));
+      setInvitations(Array.isArray(invitesData) ? invitesData : (invitesData?.data || []));
     } catch (err) {
       console.error('Error fetching members:', err);
       showToast('Failed to load organization members', 'error');
@@ -290,7 +293,8 @@ const FramerTenants = () => {
 
   useEffect(() => {
     if (activeTab === 'members') {
-      const target = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+      const tenantList = Array.isArray(tenants) ? tenants : [];
+      const target = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
       if (target) {
         setSelectedMemberTenantId(target);
         fetchMembers(target);
@@ -301,7 +305,8 @@ const FramerTenants = () => {
   // Send member invitation
   const handleSendInvitation = async (e) => {
     e.preventDefault();
-    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    const tenantList = Array.isArray(tenants) ? tenants : [];
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
     if (!targetTenantId || !inviteEmail.trim()) {
       showToast('Recipient email is required', 'error');
       return;
@@ -324,7 +329,8 @@ const FramerTenants = () => {
 
   // Update member role
   const handleUpdateMemberRole = async (memberId, newRole) => {
-    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    const tenantList = Array.isArray(tenants) ? tenants : [];
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
     if (!targetTenantId) return;
     try {
       await updateTenantMember(targetTenantId, memberId, { role: newRole });
@@ -338,7 +344,8 @@ const FramerTenants = () => {
 
   // Remove member
   const handleRemoveMember = async (memberId, memberName) => {
-    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    const tenantList = Array.isArray(tenants) ? tenants : [];
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
     if (!targetTenantId) return;
     if (!window.confirm(`Are you sure you want to remove ${memberName || 'this member'} from the organization?`)) {
       return;
@@ -355,7 +362,8 @@ const FramerTenants = () => {
 
   // Revoke invitation
   const handleRevokeInvitation = async (invitationId) => {
-    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+    const tenantList = Array.isArray(tenants) ? tenants : [];
+    const targetTenantId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
     if (!targetTenantId) return;
     if (!window.confirm('Are you sure you want to revoke this pending invitation?')) return;
     try {
@@ -451,13 +459,14 @@ const FramerTenants = () => {
           }`}
         >
           <Building2 className="w-3.5 h-3.5" />
-          <span>Organizations ({tenants.length})</span>
+          <span>Organizations ({(Array.isArray(tenants) ? tenants : []).length})</span>
         </button>
         <button
           type="button"
           onClick={() => {
             setActiveTab('members');
-            const targetId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenants.length > 0 ? tenants[0].id : null);
+            const tenantList = Array.isArray(tenants) ? tenants : [];
+            const targetId = selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null);
             if (targetId) {
               setSelectedMemberTenantId(targetId);
               fetchMembers(targetId);
@@ -689,13 +698,16 @@ const FramerTenants = () => {
             }}
             className="text-input-stripi py-1.5 px-3 text-xs font-semibold text-[#0d253d] max-w-xs"
           >
-            {tenants.map(t => (
+            {(Array.isArray(tenants) ? tenants : []).map(t => (
               <option key={t.id} value={t.id}>{t.name} ({t.tier || t.plan || 'Free'})</option>
             ))}
           </select>
           <button
             type="button"
-            onClick={() => fetchMembers(selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id)}
+            onClick={() => {
+              const tenantList = Array.isArray(tenants) ? tenants : [];
+              fetchMembers(selectedMemberTenantId || contextTenant?.tenant_id || contextTenant?.id || (tenantList.length > 0 ? tenantList[0].id : null));
+            }}
             className="btn-secondary-pill p-2 text-xs"
             title="Refresh Member Roster"
           >
@@ -717,7 +729,7 @@ const FramerTenants = () => {
             <h3 className="font-heading-sm text-[#0d253d]">Active Organization Members</h3>
             <p className="text-xs text-[#64748d]">Authenticated Auth0 users authorized in this tenant</p>
           </div>
-          <span className="pill-tag-soft text-xs">{members.length} {members.length === 1 ? 'Member' : 'Members'}</span>
+          <span className="pill-tag-soft text-xs">{(Array.isArray(members) ? members : []).length} {(Array.isArray(members) ? members : []).length === 1 ? 'Member' : 'Members'}</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -750,8 +762,8 @@ const FramerTenants = () => {
                     <td className="py-4 px-6 text-right"><div className="h-6 bg-[#e3e8ee] rounded w-16 ml-auto" /></td>
                   </tr>
                 ))
-              ) : members.length > 0 ? (
-                members.map((member) => (
+              ) : (Array.isArray(members) ? members : []).length > 0 ? (
+                (Array.isArray(members) ? members : []).map((member) => (
                   <tr key={member.id} className="hover:bg-[#f6f9fc] transition-colors">
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
@@ -832,7 +844,7 @@ const FramerTenants = () => {
             <h3 className="font-heading-sm text-[#0d253d]">Pending Invitations</h3>
             <p className="text-xs text-[#64748d]">Single-use cryptographic invitations awaiting acceptance</p>
           </div>
-          <span className="pill-tag-soft text-xs">{invitations.length} Pending</span>
+          <span className="pill-tag-soft text-xs">{(Array.isArray(invitations) ? invitations : []).length} Pending</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -847,8 +859,8 @@ const FramerTenants = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#e3e8ee]">
-              {invitations.length > 0 ? (
-                invitations.map((inv) => (
+              {(Array.isArray(invitations) ? invitations : []).length > 0 ? (
+                (Array.isArray(invitations) ? invitations : []).map((inv) => (
                   <tr key={inv.id} className="hover:bg-[#f6f9fc] transition-colors">
                     <td className="py-3.5 px-6 font-mono text-xs text-[#0d253d] flex items-center gap-2">
                       <Mail className="w-3.5 h-3.5 text-[#4D7C0F]" />
@@ -1040,8 +1052,8 @@ const FramerTenants = () => {
                                 Loading keys...
                               </td>
                             </tr>
-                          ) : tenantKeys.length > 0 ? (
-                            tenantKeys.map((key) => (
+                          ) : (Array.isArray(tenantKeys) ? tenantKeys : []).length > 0 ? (
+                            (Array.isArray(tenantKeys) ? tenantKeys : []).map((key) => (
                               <tr key={key.id} className="hover:bg-[#f6f9fc]">
                                 <td className="py-2.5 px-3 text-[#0d253d] font-bold tnum">{key.prefix}...</td>
                                 <td className="py-2.5 px-3 text-[#273951] font-sans">{key.name}</td>

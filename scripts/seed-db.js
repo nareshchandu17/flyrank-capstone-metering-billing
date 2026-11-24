@@ -20,17 +20,47 @@ async function seedDatabase() {
     await client.connect();
     console.log('Connected to PostgreSQL database for demo seeding...');
 
-    // 1. Ensure Plans exist
+    // 1. Ensure Plans and Pricing Rules exist (never overwrite custom administrative limits)
     await client.query(`
-      INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage)
+      ALTER TABLE plans ADD COLUMN IF NOT EXISTS allow_overage BOOLEAN DEFAULT false;
+      ALTER TABLE plans ADD COLUMN IF NOT EXISTS base_price_cents INTEGER DEFAULT 0;
+      ALTER TABLE plans ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(255);
+
+      INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage, base_price_cents)
       VALUES 
-        ('Free', 1000, 100000, false),
-        ('Pro', 100000, 50000000, true),
-        ('Enterprise', 1000000, 500000000, true)
-      ON CONFLICT (name) DO UPDATE 
-      SET api_calls_limit = EXCLUDED.api_calls_limit,
-          ai_tokens_limit = EXCLUDED.ai_tokens_limit,
-          allow_overage = EXCLUDED.allow_overage;
+        ('Free', 1000, 100000, false, 0),
+        ('Pro', 10000, 1000000, true, 4900),
+        ('Enterprise', 1000000, 50000000, true, 49900)
+      ON CONFLICT (name) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS pricing_rules (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          category VARCHAR(50) NOT NULL,
+          rule_key VARCHAR(50) NOT NULL,
+          name VARCHAR(100) NOT NULL,
+          rate_cents NUMERIC(14, 6) NOT NULL,
+          billing_unit VARCHAR(50) NOT NULL,
+          unit_multiplier NUMERIC(14, 2) NOT NULL DEFAULT 1.0,
+          tier_min_units BIGINT DEFAULT 0,
+          tier_max_units BIGINT DEFAULT NULL,
+          currency VARCHAR(10) NOT NULL DEFAULT 'usd',
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          metadata JSONB DEFAULT '{}'::jsonb,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uq_pricing_rules_category_key UNIQUE (category, rule_key)
+      );
+
+      INSERT INTO pricing_rules (category, rule_key, name, rate_cents, billing_unit, unit_multiplier, tier_min_units, tier_max_units)
+      VALUES
+        ('api_call', 'tier_1', 'API Calls (0 - 10,000)', 500.000000, 'per_1k_units', 1000, 0, 10000),
+        ('api_call', 'tier_2', 'API Calls (10,001 - 100,000)', 300.000000, 'per_1k_units', 1000, 10000, 100000),
+        ('api_call', 'tier_3', 'API Calls (> 100,000)', 150.000000, 'per_1k_units', 1000, 100000, NULL),
+        ('ai_token', 'input', 'AI Input Tokens', 15.000000, 'per_1m_tokens', 1000000, 0, NULL),
+        ('ai_token', 'cached_input', 'AI Cached Input Tokens', 7.500000, 'per_1m_tokens', 1000000, 0, NULL),
+        ('ai_token', 'output', 'AI Output Tokens', 60.000000, 'per_1m_tokens', 1000000, 0, NULL),
+        ('ai_token', 'reasoning', 'AI Reasoning Tokens', 60.000000, 'per_1m_tokens', 1000000, 0, NULL)
+      ON CONFLICT (category, rule_key) DO NOTHING;
     `);
 
     const freePlanRes = await client.query("SELECT id, ai_tokens_limit, api_calls_limit FROM plans WHERE name = 'Free'");
