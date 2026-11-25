@@ -93,8 +93,8 @@ npm run db:init
 npm run seed
 ```
 Creates:
-- **Acme AI Technologies** (Pro Plan - Active, Stripe customer, 8 usage events, 2 invoices). API Key: `sk_live_demo_acme_tech_key_001`
-- **Startup Studio** (Free Plan - Quota alert test, 85,000 / 100,000 tokens used, 80% warning alert). API Key: `sk_live_demo_startup_studio_002`
+- **Acme AI Technologies** (Pro Plan - Active, Stripe customer, 8 usage events, 2 invoices) with a randomly generated `demo_key_...` API key.
+- **Startup Studio** (Free Plan - Quota alert test, 85,000 / 100,000 tokens used, 80% warning alert) with a randomly generated `demo_key_...` API key.
 
 ### 4. Run Locally
 ```bash

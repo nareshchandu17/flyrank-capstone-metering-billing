@@ -23,11 +23,36 @@ class StripeService {
   }
 
   /**
-   * Validate Stripe test-mode configuration.
-   * Ensures test-mode secret key, webhook secret, and configured Price IDs are valid.
+   * Distinguish Stripe deployment environment: 'production', 'staging', or 'development'.
+   * @param {Object} [env]
+   * @returns {'production'|'staging'|'development'}
+   */
+  getStripeEnvironment(env = process.env) {
+    const explicit = (env.STRIPE_ENV || '').trim().toLowerCase();
+    if (explicit) {
+      if (explicit === 'production' || explicit === 'staging' || explicit === 'development') {
+        return explicit;
+      }
+      throw new Error(
+        `Invalid STRIPE_ENV "${explicit}". Must be "development", "staging", or "production".`
+      );
+    }
+
+    const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
+    if (nodeEnv === 'production') return 'production';
+    if (nodeEnv === 'staging') return 'staging';
+    return 'development';
+  }
+
+  /**
+   * Validate Stripe configuration for the current environment.
+   * - production: requires sk_live_, valid non-placeholder whsec_, APP_URL, and active recurring live Price IDs
+   * - staging: requires sk_test_, valid non-placeholder whsec_, and active recurring test Price IDs
+   * - development: requires sk_test_ or sk_live_, whsec_, and configured Price IDs
    * Throws informative errors if configuration is missing or invalid.
    */
   async validateStripeConfig() {
+    const stripeEnv = this.getStripeEnvironment();
     const secretKey = (process.env.STRIPE_SECRET_KEY || '').trim();
     const webhookSecret = (process.env.STRIPE_WEBHOOK_SECRET || '').trim();
 
@@ -35,8 +60,22 @@ class StripeService {
       throw new Error('STRIPE_SECRET_KEY is not configured in environment variables');
     }
 
-    if (!secretKey.startsWith('sk_test_') && !secretKey.startsWith('sk_live_')) {
-      throw new Error('Invalid Stripe configuration: STRIPE_SECRET_KEY must start with sk_test_ or sk_live_');
+    if (stripeEnv === 'production') {
+      if (!secretKey.startsWith('sk_live_')) {
+        throw new Error(
+          'Production Stripe configuration error: STRIPE_SECRET_KEY must start with sk_live_ in production.'
+        );
+      }
+    } else if (stripeEnv === 'staging') {
+      if (!secretKey.startsWith('sk_test_')) {
+        throw new Error(
+          'Staging Stripe configuration error: STRIPE_SECRET_KEY must start with sk_test_ in staging.'
+        );
+      }
+    } else if (!secretKey.startsWith('sk_test_') && !secretKey.startsWith('sk_live_')) {
+      throw new Error(
+        'Invalid Stripe configuration: STRIPE_SECRET_KEY must start with sk_test_ or sk_live_'
+      );
     }
 
     if (!webhookSecret) {
@@ -45,6 +84,21 @@ class StripeService {
 
     if (!webhookSecret.startsWith('whsec_')) {
       throw new Error('Invalid Stripe configuration: STRIPE_WEBHOOK_SECRET must start with whsec_');
+    }
+
+    if (
+      stripeEnv === 'production' &&
+      (webhookSecret.length < 24 || /placeholder|your_|example|changeme|test/i.test(webhookSecret))
+    ) {
+      throw new Error(
+        'Production Stripe configuration error: STRIPE_WEBHOOK_SECRET appears invalid or is a placeholder.'
+      );
+    }
+
+    if (stripeEnv === 'production' && !process.env.APP_URL) {
+      throw new Error(
+        'Production configuration error: APP_URL must be configured in environment variables for Stripe redirection'
+      );
     }
 
     const freePriceId = this.getPriceId('Free');
@@ -58,30 +112,54 @@ class StripeService {
       throw new Error('STRIPE_PRICE_PRO is not configured. Set STRIPE_PRICE_PRO in .env');
     }
 
-    if (process.env.NODE_ENV === 'production' && !process.env.APP_URL) {
-      throw new Error('Production configuration error: APP_URL must be configured in environment variables for Stripe redirection');
+    // Verify actual recurring Price IDs against Stripe API
+    const stripe = this.getStripeClient();
+    if (!stripe) {
+      throw new Error('Stripe client could not be initialized.');
     }
 
-    // Verify against Stripe API if client is available
-    const stripe = this.getStripeClient();
-    if (stripe) {
-      try {
-        const resolvedProPriceId = await this.resolvePriceId('Pro');
-        if (resolvedProPriceId && resolvedProPriceId.startsWith('price_')) {
-          const proPrice = await stripe.prices.retrieve(resolvedProPriceId);
-          if (!proPrice || !proPrice.recurring) {
-            console.warn(`[StripeConfig] Warning: Pro Price ${resolvedProPriceId} is not a recurring subscription price.`);
-          }
-        }
-      } catch (err) {
-        console.warn(`[StripeConfig] Notice during price verification: ${err.message}`);
+    const verifyRecurringPrice = async (planLabel, configuredId) => {
+      const resolvedId = await this.resolvePriceId(planLabel);
+      if (!resolvedId || (!resolvedId.startsWith('price_') && !resolvedId.startsWith('plan_'))) {
+        throw new Error(
+          `Invalid Stripe configuration: ${planLabel} price "${configuredId}" did not resolve to a valid Stripe Price ID.`
+        );
       }
-    }
+
+      if (resolvedId.startsWith('price_')) {
+        const priceObj = await stripe.prices.retrieve(resolvedId);
+        if (!priceObj || priceObj.active === false) {
+          throw new Error(
+            `Invalid Stripe configuration: ${planLabel} Price ${resolvedId} is missing or inactive.`
+          );
+        }
+        if (!priceObj.recurring) {
+          throw new Error(
+            `Invalid Stripe configuration: ${planLabel} Price ${resolvedId} is not a recurring subscription price.`
+          );
+        }
+        if (stripeEnv === 'production' && priceObj.livemode !== true) {
+          throw new Error(
+            `Production Stripe configuration error: ${planLabel} Price ${resolvedId} is a test-mode price.`
+          );
+        }
+        if (stripeEnv === 'staging' && priceObj.livemode === true) {
+          throw new Error(
+            `Staging Stripe configuration error: ${planLabel} Price ${resolvedId} is a live-mode price.`
+          );
+        }
+      }
+      return resolvedId;
+    };
+
+    const resolvedFreePriceId = await verifyRecurringPrice('Free', freePriceId);
+    const resolvedProPriceId = await verifyRecurringPrice('Pro', proPriceId);
 
     return {
       valid: true,
-      freePriceId,
-      proPriceId
+      environment: stripeEnv,
+      freePriceId: resolvedFreePriceId,
+      proPriceId: resolvedProPriceId,
     };
   }
 
@@ -654,16 +732,22 @@ class StripeService {
     // 1. Webhook Lifecycle Management & Replay Safety
     // Lifecycle states: RECEIVED -> PROCESSING -> PROCESSED (on commit) / FAILED (on error)
     if (event.id) {
-      const insertResult = await pool.query(
-        `INSERT INTO webhook_events(stripe_event_id, event_type, status, attempts, created_at, updated_at)
-         VALUES($1, $2, 'processing', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-         ON CONFLICT(stripe_event_id) DO NOTHING
-         RETURNING id, status`,
-        [event.id, event.type]
-      );
+      let inserted = false;
+      try {
+        await pool.query(
+          `INSERT INTO webhook_events(stripe_event_id, event_type, status, attempts, created_at, updated_at)
+           VALUES($1, $2, 'processing', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [event.id, event.type]
+        );
+        inserted = true;
+      } catch (insertErr) {
+        if (insertErr.code !== '23505') {
+          throw insertErr;
+        }
+      }
 
       // Conflict detected - this event was received previously
-      if (insertResult.rows.length === 0) {
+      if (!inserted) {
         const existingResult = await pool.query(
           `SELECT id, status, attempts, updated_at 
            FROM webhook_events 
@@ -694,24 +778,56 @@ class StripeService {
                 message: 'Webhook event is currently being processed by another active worker'
               };
             }
-            console.warn(`Webhook event ${event.id} was abandoned in 'processing' state. Re-claiming for retry...`);
-          }
+            console.warn(`Webhook event ${event.id} was abandoned in 'processing' state. Attempting atomic stale-lock recovery...`);
 
-          // State: FAILED or STALE PROCESSING -> Safely retry the event
-          await pool.query(
-            `UPDATE webhook_events 
-             SET status = 'processing',
-                 attempts = COALESCE(attempts, 1) + 1,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE stripe_event_id = $1`,
-            [event.id]
-          );
+            // Atomic compare-and-set so two workers cannot both reclaim the same stale event
+            const claimResult = await pool.query(
+              `UPDATE webhook_events
+               SET status = 'processing',
+                   attempts = COALESCE(attempts, 1) + 1,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE stripe_event_id = $1
+                 AND status = 'processing'
+                 AND updated_at = $2
+               RETURNING id, status, attempts`,
+              [event.id, existing.updated_at]
+            );
+
+            if (claimResult.rows.length === 0) {
+              return {
+                status: 'error',
+                statusCode: 409,
+                message: 'Webhook event is currently being processed by another active worker'
+              };
+            }
+          } else if (existing.status === 'failed') {
+            // Atomic claim for failed event retry
+            const claimResult = await pool.query(
+              `UPDATE webhook_events
+               SET status = 'processing',
+                   attempts = COALESCE(attempts, 1) + 1,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE stripe_event_id = $1
+                 AND status = 'failed'
+               RETURNING id, status, attempts`,
+              [event.id]
+            );
+
+            if (claimResult.rows.length === 0) {
+              return {
+                status: 'error',
+                statusCode: 409,
+                message: 'Webhook event is currently being processed by another active worker'
+              };
+            }
+          }
         }
       }
     }
 
     let result;
     try {
+      const eventCreated = Number(event.created || 0);
       switch (event.type) {
         case 'checkout.session.completed':
           result = await this.handleCheckoutSessionCompleted(event.data.object, event.id);
@@ -719,11 +835,11 @@ class StripeService {
 
         case 'customer.subscription.created':
         case 'customer.subscription.updated':
-          result = await this.handleSubscriptionUpdated(event.data.object);
+          result = await this.handleSubscriptionUpdated(event.data.object, eventCreated);
           break;
 
         case 'customer.subscription.deleted':
-          result = await this.handleSubscriptionDeleted(event.data.object);
+          result = await this.handleSubscriptionDeleted(event.data.object, eventCreated);
           break;
 
         case 'invoice.paid':
@@ -742,8 +858,14 @@ class StripeService {
           };
       }
 
-      // If handler returned an error status, transition to FAILED
-      if (result && result.status === 'error') {
+      // A webhook returning HTTP 200 must mean its required business effects succeeded.
+      // If a handler returned an error or could not locate the target record (e.g. out-of-order),
+      // transition to FAILED and return non-200 so Stripe retries.
+      if (result && (result.status === 'error' || result.status === 'not_found')) {
+        const failureResult =
+          result.status === 'not_found'
+            ? { status: 'error', statusCode: 409, message: result.message }
+            : result;
         if (event.id) {
           await pool.query(
             `UPDATE webhook_events 
@@ -751,10 +873,10 @@ class StripeService {
                  error_message = $1,
                  updated_at = CURRENT_TIMESTAMP
              WHERE stripe_event_id = $2`,
-            [result.message || 'Processing returned error', event.id]
+            [failureResult.message || 'Processing returned error', event.id]
           );
         }
-        return result;
+        return failureResult;
       }
 
       // SUCCESS: Mark PROCESSED only after database transactions commit
@@ -916,9 +1038,10 @@ class StripeService {
   /**
    * Handle customer.subscription.updated event
    * @param {Object} subscription - Stripe subscription object
+   * @param {number} [eventCreated=0] - Stripe event.created Unix timestamp for out-of-order protection
    * @returns {Object} - Processing result
    */
-  async handleSubscriptionUpdated(subscription) {
+  async handleSubscriptionUpdated(subscription, eventCreated = 0) {
     const client = await pool.connect();
 
     try {
@@ -926,7 +1049,7 @@ class StripeService {
 
       // Check if subscription exists
       const existingSubscription = await client.query(
-        'SELECT id, tenant_id FROM subscriptions WHERE stripe_subscription_id = $1',
+        'SELECT * FROM subscriptions WHERE stripe_subscription_id = $1',
         [subscription.id]
       );
 
@@ -967,19 +1090,32 @@ class StripeService {
 
         await client.query(
           `INSERT INTO subscriptions 
-           (tenant_id, stripe_subscription_id, status, plan_id, current_period_start, current_period_end)
-           VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6))`,
+           (tenant_id, stripe_subscription_id, status, plan_id, current_period_start, current_period_end, last_event_created)
+           VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), $7)`,
           [
             tenantId,
             subscription.id,
             subscription.status,
             planId,
             periodStart,
-            periodEnd
+            periodEnd,
+            eventCreated || 0
           ]
         );
       } else {
-        tenantId = existingSubscription.rows[0].tenant_id;
+        const existing = existingSubscription.rows[0];
+        const lastEventCreated = Number(existing.last_event_created || 0);
+
+        // Out-of-order guard: ignore older events that arrive after a newer event
+        if (eventCreated > 0 && lastEventCreated > eventCreated) {
+          await client.query('ROLLBACK');
+          return {
+            status: 'ignored',
+            message: `Stale out-of-order subscription event ignored (event=${eventCreated} < recorded=${lastEventCreated})`
+          };
+        }
+
+        tenantId = existing.tenant_id;
 
         const periodStart = subscription.current_period_start || 
                             subscription.items?.data?.[0]?.current_period_start || 
@@ -993,12 +1129,14 @@ class StripeService {
            SET status = $1, 
                current_period_start = to_timestamp($2),
                current_period_end = to_timestamp($3),
+               last_event_created = GREATEST(COALESCE(last_event_created, 0), $4),
                updated_at = CURRENT_TIMESTAMP
-           WHERE stripe_subscription_id = $4`,
+           WHERE stripe_subscription_id = $5`,
           [
             subscription.status,
             periodStart,
             periodEnd,
+            eventCreated || 0,
             subscription.id
           ]
         );
@@ -1046,16 +1184,17 @@ class StripeService {
   /**
    * Handle customer.subscription.deleted event
    * @param {Object} subscription - Stripe subscription object
+   * @param {number} [eventCreated=0] - Stripe event.created Unix timestamp
    * @returns {Object} - Processing result
    */
-  async handleSubscriptionDeleted(subscription) {
+  async handleSubscriptionDeleted(subscription, eventCreated = 0) {
     const client = await pool.connect();
 
     try {
       await client.query('BEGIN');
 
       const existingSubscription = await client.query(
-        'SELECT tenant_id FROM subscriptions WHERE stripe_subscription_id = $1',
+        'SELECT tenant_id, last_event_created FROM subscriptions WHERE stripe_subscription_id = $1',
         [subscription.id]
       );
 
@@ -1067,12 +1206,26 @@ class StripeService {
         };
       }
 
-      const tenantId = existingSubscription.rows[0].tenant_id;
+      const existing = existingSubscription.rows[0];
+      const lastEventCreated = Number(existing.last_event_created || 0);
+      if (eventCreated > 0 && lastEventCreated > eventCreated) {
+        await client.query('ROLLBACK');
+        return {
+          status: 'ignored',
+          message: `Stale out-of-order subscription deletion ignored (event=${eventCreated} < recorded=${lastEventCreated})`
+        };
+      }
+
+      const tenantId = existing.tenant_id;
 
       // Update subscription status to canceled
       await client.query(
-        "UPDATE subscriptions SET status = 'canceled', updated_at = CURRENT_TIMESTAMP WHERE stripe_subscription_id = $1",
-        [subscription.id]
+        `UPDATE subscriptions
+         SET status = 'canceled',
+             last_event_created = GREATEST(COALESCE(last_event_created, 0), $1),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE stripe_subscription_id = $2`,
+        [eventCreated || 0, subscription.id]
       );
 
       // Move tenant back to Free plan
@@ -1123,6 +1276,16 @@ class StripeService {
 
       // Update matching local invoice by stripe_invoice_id or metadata.local_invoice_id
       const localInvoiceId = invoice.metadata?.local_invoice_id;
+      let existingRow = null;
+      if (localInvoiceId) {
+        const res = await client.query('SELECT id, status FROM invoices WHERE id = $1', [localInvoiceId]);
+        existingRow = res.rows[0] || null;
+      } else if (stripeInvoiceId) {
+        const res = await client.query('SELECT id, status FROM invoices WHERE stripe_invoice_id = $1', [stripeInvoiceId]);
+        existingRow = res.rows[0] || null;
+      }
+
+      const wasAlreadyPaid = existingRow?.status === 'paid';
       let updatedInvoice;
 
       if (localInvoiceId) {
@@ -1133,7 +1296,7 @@ class StripeService {
                stripe_payment_intent_id = COALESCE($2, stripe_payment_intent_id),
                hosted_invoice_url = COALESCE($3, hosted_invoice_url),
                invoice_pdf = COALESCE($4, invoice_pdf),
-               paid_at = COALESCE($5, CURRENT_TIMESTAMP),
+               paid_at = COALESCE(paid_at, $5, CURRENT_TIMESTAMP),
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $6
            RETURNING id, tenant_id, billing_period`,
@@ -1146,7 +1309,7 @@ class StripeService {
                stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id),
                hosted_invoice_url = COALESCE($2, hosted_invoice_url),
                invoice_pdf = COALESCE($3, invoice_pdf),
-               paid_at = COALESCE($4, CURRENT_TIMESTAMP),
+               paid_at = COALESCE(paid_at, $4, CURRENT_TIMESTAMP),
                updated_at = CURRENT_TIMESTAMP
            WHERE stripe_invoice_id = $5
            RETURNING id, tenant_id, billing_period`,
@@ -1171,6 +1334,13 @@ class StripeService {
       }
 
       await client.query('COMMIT');
+      if (wasAlreadyPaid) {
+        return {
+          status: 'duplicate',
+          message: 'Invoice already marked as paid',
+          invoice_id: updatedInvoice?.rows[0]?.id || existingRow?.id || null
+        };
+      }
       return {
         status: 'success',
         message: 'Invoice payment recorded successfully',

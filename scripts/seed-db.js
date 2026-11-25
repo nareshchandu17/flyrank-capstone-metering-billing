@@ -10,10 +10,39 @@ const clientConfig = process.env.DATABASE_URL
       port: parseInt(process.env.DB_PORT || '5432', 10),
       database: process.env.DB_NAME || 'usage_metering',
       user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'password',
+      password: process.env.DB_PASSWORD || '',
     };
 
+/**
+ * Verify that demo seeding is only executed in safe non-production environments.
+ */
+function assertSafeSeedEnvironment(env = process.env) {
+  const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
+  if (nodeEnv === 'production' || !['development', 'test', 'local'].includes(nodeEnv)) {
+    throw new Error(
+      `Refusing to run demo seed script in "${nodeEnv}" environment. Demo seeding is strictly prohibited outside development/test/local.`
+    );
+  }
+
+  const dbUrl = (env.DATABASE_URL || '').trim();
+  if (
+    dbUrl &&
+    !dbUrl.includes('localhost') &&
+    !dbUrl.includes('127.0.0.1') &&
+    env.ALLOW_DEMO_SEED !== 'true'
+  ) {
+    throw new Error(
+      'Refusing to run demo seed script against a non-local DATABASE_URL without ALLOW_DEMO_SEED=true.'
+    );
+  }
+}
+
+function generateDemoApiKey() {
+  return `demo_key_${crypto.randomBytes(24).toString('hex')}`;
+}
+
 async function seedDatabase() {
+  assertSafeSeedEnvironment(process.env);
   const client = new Client(clientConfig);
 
   try {
@@ -37,6 +66,7 @@ async function seedDatabase() {
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           category VARCHAR(50) NOT NULL,
           rule_key VARCHAR(50) NOT NULL,
+          tier_name VARCHAR(100),
           name VARCHAR(100) NOT NULL,
           rate_cents NUMERIC(14, 6) NOT NULL,
           billing_unit VARCHAR(50) NOT NULL,
@@ -50,6 +80,8 @@ async function seedDatabase() {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           CONSTRAINT uq_pricing_rules_category_key UNIQUE (category, rule_key)
       );
+      ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS tier_name VARCHAR(100);
+      ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS unit_multiplier NUMERIC(14, 2) NOT NULL DEFAULT 1.0;
 
       INSERT INTO pricing_rules (category, rule_key, name, rate_cents, billing_unit, unit_multiplier, tier_min_units, tier_max_units)
       VALUES
@@ -85,8 +117,8 @@ async function seedDatabase() {
       await client.query("UPDATE tenants SET plan_id = $1, status = 'active' WHERE id = $2", [proPlan.id, acmeTenantId]);
     }
 
-    // 3. Seed Acme API Key
-    const acmeApiKey = 'sk_live_demo_acme_tech_key_001';
+    // 3. Seed Acme API Key (randomly generated non-live demo key)
+    const acmeApiKey = generateDemoApiKey();
     const acmeKeyPrefix = acmeApiKey.substring(0, 12);
     const acmeKeyHash = crypto.createHash('sha256').update(acmeApiKey).digest('hex');
 
@@ -188,8 +220,8 @@ async function seedDatabase() {
       await client.query("UPDATE tenants SET plan_id = $1, status = 'active' WHERE id = $2", [freePlan.id, startupTenantId]);
     }
 
-    // Startup API Key
-    const startupApiKey = 'sk_live_demo_startup_studio_002';
+    // Startup API Key (randomly generated non-live demo key)
+    const startupApiKey = generateDemoApiKey();
     const startupKeyPrefix = startupApiKey.substring(0, 12);
     const startupKeyHash = crypto.createHash('sha256').update(startupApiKey).digest('hex');
 
@@ -229,18 +261,16 @@ async function seedDatabase() {
     console.log('\n================================================================');
     console.log('🎉 REPRODUCIBLE DEMO ENVIRONMENT SUCCESSFULLY SEEDED');
     console.log('================================================================');
-    console.log(`[Admin Access]`);
-    console.log(`  Admin Secret Key : ${process.env.ADMIN_API_KEY || 'admin-secret-key'}`);
     console.log(`\n[Tenant 1: Acme AI Technologies (Pro Plan)]`);
     console.log(`  Tenant ID        : ${acmeTenantId}`);
     console.log(`  Email            : ${acmeEmail}`);
-    console.log(`  API Key          : ${acmeApiKey}`);
+    console.log(`  API Key Prefix   : ${acmeKeyPrefix}...`);
     console.log(`  Stripe Customer  : cus_demo_acme_prod`);
     console.log(`  Status           : Active, with 8 usage events and 2 invoices (1 Paid, 1 Pending)`);
     console.log(`\n[Tenant 2: Startup Studio (Free Plan - Quota Alert Demo)]`);
     console.log(`  Tenant ID        : ${startupTenantId}`);
     console.log(`  Email            : ${startupEmail}`);
-    console.log(`  API Key          : ${startupApiKey}`);
+    console.log(`  API Key Prefix   : ${startupKeyPrefix}...`);
     console.log(`  Status           : 85,000 / 100,000 tokens used (80% Warning Alert triggered)`);
     console.log('================================================================\n');
 
@@ -256,4 +286,8 @@ if (require.main === module) {
   seedDatabase();
 }
 
-module.exports = { seedDatabase };
+module.exports = {
+  seedDatabase,
+  assertSafeSeedEnvironment,
+  generateDemoApiKey,
+};

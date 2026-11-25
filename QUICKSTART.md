@@ -23,11 +23,10 @@ npm run install:frontend
 ```bash
 cp .env.example .env
 ```
-Default configuration values in `.env` are ready for instant execution:
+Default configuration values in `.env` (copied from `.env.example`):
 - `PORT=3001` (Backend API)
-- `ADMIN_API_KEY=admin-secret-key`
 - `DB_PORT=5434` (Matches Docker PostgreSQL port mapping)
-- `STRIPE_SECRET_KEY` & `STRIPE_WEBHOOK_SECRET` (Preconfigured for test mode; platform also runs cleanly without Stripe configured)
+- `STRIPE_SECRET_KEY` & `STRIPE_WEBHOOK_SECRET` (Configured in `.env` from your Stripe Dashboard; platform also runs cleanly without Stripe configured in development)
 
 ---
 
@@ -68,13 +67,13 @@ npm test
 ```bash
 npm run seed
 ```
-This command seeds realistic, reproducible demo data:
+This command seeds realistic, reproducible demo data (non-production only):
 - **Tenant 1: Acme AI Technologies** (Pro Plan - Active)
-  - Pre-seeded API key: `sk_live_demo_acme_tech_key_001`
+  - Randomly generated non-live demo API key (prefix `demo_key_...`)
   - 8 real usage events across past 24 hours
   - 2 invoices: 1 Paid previous invoice, 1 Open/Pending current invoice
 - **Tenant 2: Startup Studio** (Free Plan - Quota Alert Demo)
-  - Pre-seeded API key: `sk_live_demo_startup_studio_002`
+  - Randomly generated non-live demo API key (prefix `demo_key_...`)
   - 85,000 / 100,000 tokens used (85% of Free quota)
   - Active 80% quota warning alert in database
 
@@ -167,10 +166,27 @@ curl -X POST http://localhost:3001/api/usage \
 
 ---
 
-## 🛠️ Production Build Verification
+## 🛠️ Production Build & Container Deployment
 
+### Local Bundle Verification
 ```bash
 # Test production bundle compilation
 npm run build:frontend
+npm run lint:frontend
 ```
-Generates clean minified assets in `frontend/dist/` with 0 errors.
+Generates clean minified assets in `frontend/dist/` with 0 warnings and 0 errors.
+
+### Complete Containerized Production Deployment
+```bash
+# Build production multi-stage images (PostgreSQL, Backend API, Frontend Nginx)
+npm run docker:prod:build
+
+# Launch production stack in background
+npm run docker:prod:up
+
+# Inspect healthy services
+docker ps
+```
+- **Frontend SPA (Nginx):** `http://localhost:80`
+- **Backend API (Express):** `http://localhost:3000`
+- **PostgreSQL Database:** Internal container network on port `5432` with persistent data volume `postgres_prod_data`.

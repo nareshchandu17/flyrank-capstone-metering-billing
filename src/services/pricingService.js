@@ -30,6 +30,33 @@ class PricingService {
   }
 
   /**
+   * Parse and validate a numeric unit multiplier
+   * @param {*} rawMultiplier
+   * @param {string} [ruleKey]
+   * @returns {number}
+   */
+  _parsePositiveMultiplier(rawMultiplier, ruleKey = 'unknown') {
+    if (
+      rawMultiplier === null ||
+      rawMultiplier === undefined ||
+      (typeof rawMultiplier === 'string' && rawMultiplier.trim() === '')
+    ) {
+      throw new Error(
+        `Invalid unit multiplier for rule ${ruleKey}: unit_multiplier is required and must be a finite positive number.`
+      );
+    }
+
+    const multiplier = Number(rawMultiplier);
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      throw new Error(
+        `Invalid unit multiplier for rule ${ruleKey}: unit_multiplier must be a finite positive number.`
+      );
+    }
+
+    return multiplier;
+  }
+
+  /**
    * Validate pricing rules structure and consistency
    * @param {Array<Object>} rules 
    */
@@ -49,26 +76,28 @@ class PricingService {
       throw new Error('Pricing configuration error: No active pricing rules configured for category "ai_token".');
     }
 
-    // Validate tier boundaries for api_call rules
+    const validateRule = (rule) => {
+      if (
+        rule.rate_cents === null ||
+        rule.rate_cents === undefined ||
+        (typeof rule.rate_cents === 'string' && rule.rate_cents.trim() === '')
+      ) {
+        throw new Error(`Invalid rate for rule ${rule.rule_key}: rate must be a finite non-negative number.`);
+      }
+      const rate = Number(rule.rate_cents);
+      if (!Number.isFinite(rate) || rate < 0) {
+        throw new Error(`Invalid rate for rule ${rule.rule_key}: rate cannot be negative or non-finite.`);
+      }
+      this._parsePositiveMultiplier(rule.unit_multiplier, rule.rule_key);
+    };
+
     const sortedApi = [...apiRules].sort((a, b) => (Number(a.tier_min_units) || 0) - (Number(b.tier_min_units) || 0));
-    for (let i = 0; i < sortedApi.length; i++) {
-      const rule = sortedApi[i];
-      if (Number(rule.rate_cents) < 0) {
-        throw new Error(`Invalid rate for rule ${rule.rule_key}: rate cannot be negative.`);
-      }
-      if (Number(rule.billing_unit) <= 0) {
-        throw new Error(`Invalid billing unit for rule ${rule.rule_key}: billing unit must be positive.`);
-      }
+    for (const rule of sortedApi) {
+      validateRule(rule);
     }
 
-    // Validate AI token rules
     for (const rule of aiRules) {
-      if (Number(rule.rate_cents) < 0) {
-        throw new Error(`Invalid rate for rule ${rule.rule_key}: rate cannot be negative.`);
-      }
-      if (Number(rule.billing_unit) <= 0) {
-        throw new Error(`Invalid billing unit for rule ${rule.rule_key}: billing unit must be positive.`);
-      }
+      validateRule(rule);
     }
 
     return true;
@@ -81,8 +110,19 @@ class PricingService {
    */
   async loadPricingRules(client = pool) {
     const query = `
-      SELECT id, category, rule_key, tier_name, rate_cents, billing_unit, currency, 
-             tier_min_units, tier_max_units, is_active, metadata
+      SELECT
+        id,
+        category,
+        rule_key,
+        tier_name,
+        rate_cents,
+        billing_unit,
+        unit_multiplier,
+        currency,
+        tier_min_units,
+        tier_max_units,
+        is_active,
+        metadata
       FROM pricing_rules
       WHERE is_active = true
       ORDER BY category, tier_min_units ASC NULLS FIRST
@@ -91,7 +131,11 @@ class PricingService {
     const rules = res.rows.map(row => ({
       ...row,
       rate_cents: Number(row.rate_cents),
-      billing_unit: Number(row.billing_unit),
+      billing_unit: row.billing_unit,
+      unit_multiplier:
+        row.unit_multiplier === null || row.unit_multiplier === undefined || row.unit_multiplier === ''
+          ? NaN
+          : Number(row.unit_multiplier),
       tier_min_units: row.tier_min_units != null ? Number(row.tier_min_units) : 0,
       tier_max_units: row.tier_max_units != null ? Number(row.tier_max_units) : null,
     }));
@@ -214,13 +258,10 @@ class PricingService {
    * @returns {number}
    */
   getUnitMultiplier(rule) {
-    if (rule.unit_multiplier != null && !isNaN(rule.unit_multiplier) && Number(rule.unit_multiplier) > 0) {
-      return Number(rule.unit_multiplier);
+    if (!rule || typeof rule !== 'object') {
+      throw new Error('Invalid pricing rule: rule object is required.');
     }
-    if (rule.billing_unit != null && !isNaN(rule.billing_unit) && Number(rule.billing_unit) > 0) {
-      return Number(rule.billing_unit);
-    }
-    return 1.0;
+    return this._parsePositiveMultiplier(rule.unit_multiplier, rule.rule_key);
   }
 
   /**

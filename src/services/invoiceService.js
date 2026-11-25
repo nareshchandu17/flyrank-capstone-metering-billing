@@ -290,66 +290,20 @@ class InvoiceService {
 
     if (stripe && tenant.stripe_customer_id && totalAmountCents > 0 && createStripe) {
       try {
-        // Create line items in Stripe with stable idempotency keys
-        for (let i = 0; i < lineItems.length; i++) {
-          const item = lineItems[i];
-          if (item.amount_cents > 0) {
-            await stripe.invoiceItems.create(
-              {
-                customer: tenant.stripe_customer_id,
-                amount: item.amount_cents,
-                currency: (tenant.currency || 'usd').toLowerCase(),
-                description: item.description,
-              },
-              {
-                idempotencyKey: `invitem_${invoiceId}_${i}`
-              }
-            );
-          }
-        }
-
-        // Create Stripe Invoice with stable idempotency key
-        const stripeInvoice = await stripe.invoices.create(
-          {
-            customer: tenant.stripe_customer_id,
-            auto_advance: true,
-            collection_method: 'charge_automatically',
-            metadata: {
-              tenant_id: tenantId,
-              billing_period: period,
-              local_invoice_id: invoiceId
-            }
-          },
-          {
-            idempotencyKey: `inv_${invoiceId}`
-          }
-        );
-
-        // Finalize invoice so it is ready for payment
-        const finalized = await stripe.invoices.finalizeInvoice(stripeInvoice.id);
-        stripeInvoiceId = finalized.id;
-        hostedInvoiceUrl = finalized.hosted_invoice_url || null;
-        invoicePdf = finalized.invoice_pdf || null;
-
-        if (finalized.status === 'paid') {
-          finalStatus = 'paid';
-          paidAt = new Date();
-        } else {
-          finalStatus = finalized.status || 'open';
-        }
-
-        // Update local invoice with Stripe data
-        await pool.query(
-          `UPDATE invoices 
-           SET stripe_invoice_id = $1, 
-               hosted_invoice_url = $2, 
-               invoice_pdf = $3, 
-               status = $4,
-               paid_at = $5,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $6`,
-          [stripeInvoiceId, hostedInvoiceUrl, invoicePdf, finalStatus, paidAt, invoiceId]
-        );
+        const synced = await this._pushInvoiceToStripe({
+          stripe,
+          customerId: tenant.stripe_customer_id,
+          invoiceId,
+          tenantId,
+          billingPeriod: period,
+          lineItems,
+          currency: (tenant.currency || 'usd').toLowerCase(),
+        });
+        stripeInvoiceId = synced.stripeInvoiceId;
+        hostedInvoiceUrl = synced.hostedInvoiceUrl;
+        invoicePdf = synced.invoicePdf;
+        finalStatus = synced.finalStatus;
+        paidAt = synced.paidAt;
       } catch (stripeErr) {
         console.error('Stripe invoice creation error (retaining local invoice for recoverable sync):', stripeErr.message);
       }
@@ -371,6 +325,97 @@ class InvoiceService {
         paid_at: paidAt,
         line_items: lineItems
       }
+    };
+  }
+
+  /**
+   * Idempotently push local invoice items and invoice to Stripe, finalize if draft,
+   * and persist Stripe metadata back to the local invoice record.
+   * @private
+   */
+  async _pushInvoiceToStripe({ stripe, customerId, invoiceId, tenantId, billingPeriod, lineItems, currency }) {
+    const normalizedCurrency = (currency || 'usd').toLowerCase();
+
+    // Sort deterministically so retries via syncInvoiceToStripe generate identical idempotency keys
+    const billableItems = [...lineItems]
+      .filter(item => Number(item.amount_cents) > 0)
+      .sort((a, b) =>
+        String(a.description).localeCompare(String(b.description)) ||
+        Number(a.amount_cents) - Number(b.amount_cents) ||
+        Number(a.quantity) - Number(b.quantity)
+      );
+
+    for (let i = 0; i < billableItems.length; i++) {
+      const item = billableItems[i];
+      await stripe.invoiceItems.create(
+        {
+          customer: customerId,
+          amount: Number(item.amount_cents),
+          currency: normalizedCurrency,
+          description: item.description,
+        },
+        {
+          idempotencyKey: `invitem_${invoiceId}_${i}`,
+        }
+      );
+    }
+
+    const stripeInvoice = await stripe.invoices.create(
+      {
+        customer: customerId,
+        currency: normalizedCurrency,
+        auto_advance: true,
+        collection_method: 'charge_automatically',
+        metadata: {
+          tenant_id: tenantId,
+          billing_period: billingPeriod,
+          local_invoice_id: invoiceId,
+        },
+      },
+      {
+        idempotencyKey: `inv_${invoiceId}`,
+      }
+    );
+
+    // Only finalize if the invoice is still in draft state (safe on retries)
+    const finalized =
+      !stripeInvoice.status || stripeInvoice.status === 'draft'
+        ? await stripe.invoices.finalizeInvoice(
+            stripeInvoice.id,
+            {},
+            { idempotencyKey: `inv_finalize_${invoiceId}` }
+          )
+        : stripeInvoice;
+
+    const stripeInvoiceId = finalized.id;
+    const hostedInvoiceUrl = finalized.hosted_invoice_url || null;
+    const invoicePdf = finalized.invoice_pdf || null;
+    const finalStatus = finalized.status === 'paid' ? 'paid' : (finalized.status || 'open');
+    const paidAt =
+      finalized.status === 'paid'
+        ? (finalized.status_transitions?.paid_at
+            ? new Date(finalized.status_transitions.paid_at * 1000)
+            : new Date())
+        : null;
+
+    await pool.query(
+      `UPDATE invoices 
+       SET stripe_invoice_id = $1, 
+           hosted_invoice_url = $2, 
+           invoice_pdf = $3, 
+           status = $4,
+           paid_at = COALESCE($5, paid_at),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6`,
+      [stripeInvoiceId, hostedInvoiceUrl, invoicePdf, finalStatus, paidAt, invoiceId]
+    );
+
+    return {
+      stripeInvoiceId,
+      hostedInvoiceUrl,
+      invoicePdf,
+      finalStatus,
+      paidAt,
     };
   }
 
@@ -422,62 +467,21 @@ class InvoiceService {
       return this.getInvoiceById(invoiceId);
     }
 
-    // If no Stripe invoice exists yet, create items and invoice idempotently
+    // If no Stripe invoice exists yet, create items and invoice idempotently using tenant's currency
     const lineItemsRes = await pool.query(
-      'SELECT * FROM invoice_line_items WHERE invoice_id = $1 ORDER BY id ASC',
+      'SELECT * FROM invoice_line_items WHERE invoice_id = $1 ORDER BY description ASC, amount_cents ASC',
       [invoiceId]
     );
-    const lineItems = lineItemsRes.rows;
 
-    for (let i = 0; i < lineItems.length; i++) {
-      const item = lineItems[i];
-      if (item.amount_cents > 0) {
-        await stripe.invoiceItems.create(
-          {
-            customer: customerId,
-            amount: item.amount_cents,
-            currency: 'usd',
-            description: item.description,
-          },
-          {
-            idempotencyKey: `invitem_${invoiceId}_${i}`
-          }
-        );
-      }
-    }
-
-    const stripeInvoice = await stripe.invoices.create(
-      {
-        customer: customerId,
-        auto_advance: true,
-        collection_method: 'charge_automatically',
-        metadata: {
-          tenant_id: invoice.tenant_id,
-          billing_period: invoice.billing_period,
-          local_invoice_id: invoiceId
-        }
-      },
-      {
-        idempotencyKey: `inv_${invoiceId}`
-      }
-    );
-
-    const finalized = await stripe.invoices.finalizeInvoice(stripeInvoice.id);
-
-    const finalStatus = finalized.status === 'paid' ? 'paid' : (finalized.status || 'open');
-    const paidAt = finalized.status === 'paid' ? new Date() : null;
-
-    await pool.query(
-      `UPDATE invoices 
-       SET stripe_invoice_id = $1, 
-           hosted_invoice_url = $2, 
-           invoice_pdf = $3, 
-           status = $4,
-           paid_at = $5,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6`,
-      [finalized.id, finalized.hosted_invoice_url || null, finalized.invoice_pdf || null, finalStatus, paidAt, invoiceId]
-    );
+    await this._pushInvoiceToStripe({
+      stripe,
+      customerId,
+      invoiceId,
+      tenantId: invoice.tenant_id,
+      billingPeriod: invoice.billing_period,
+      lineItems: lineItemsRes.rows,
+      currency: (tenant.currency || 'usd').toLowerCase(),
+    });
 
     return this.getInvoiceById(invoiceId);
   }

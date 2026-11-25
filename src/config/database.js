@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const fs = require('fs');
 require('dotenv').config();
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -13,14 +14,45 @@ if (isProduction && !hasDatabaseUrl && (!process.env.DB_HOST || !process.env.DB_
   throw new Error(errMsg);
 }
 
-// Determine SSL requirements: enabled if DB_SSL=true or if production cloud database (e.g. Supabase, RDS, Neon)
-const useSsl = process.env.DB_SSL === 'true' || 
-  (hasDatabaseUrl && !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1'));
+/**
+ * Build PostgreSQL TLS/SSL configuration.
+ * In production, certificate verification (rejectUnauthorized: true) is strictly enforced
+ * and optional custom CA certificates can be supplied via DB_SSL_CA or DB_SSL_CA_PATH.
+ */
+function buildSslConfig(env = process.env) {
+  const prod = env.NODE_ENV === 'production';
+  const dbUrl = (env.DATABASE_URL || '').trim();
+  const hasUrl = dbUrl.length > 0;
+  const isLocalUrl = hasUrl && (dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1'));
+
+  const useSsl = env.DB_SSL === 'true' || (hasUrl && !isLocalUrl);
+  if (!useSsl) {
+    return false;
+  }
+
+  if (prod && env.DB_SSL_REJECT_UNAUTHORIZED === 'false') {
+    throw new Error(
+      'FATAL CONFIGURATION ERROR: Disabling PostgreSQL TLS certificate verification (DB_SSL_REJECT_UNAUTHORIZED=false) is forbidden in production.'
+    );
+  }
+
+  let ca;
+  if (env.DB_SSL_CA && env.DB_SSL_CA.trim()) {
+    ca = env.DB_SSL_CA.replace(/\\n/g, '\n');
+  } else if (env.DB_SSL_CA_PATH && env.DB_SSL_CA_PATH.trim()) {
+    ca = fs.readFileSync(env.DB_SSL_CA_PATH.trim(), 'utf8');
+  }
+
+  const rejectUnauthorized = prod ? true : env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
+  return ca ? { rejectUnauthorized, ca } : { rejectUnauthorized };
+}
+
+const sslConfig = buildSslConfig(process.env);
 
 const poolConfig = hasDatabaseUrl
   ? {
       connectionString: process.env.DATABASE_URL.trim(),
-      ssl: useSsl ? { rejectUnauthorized: false } : false,
+      ssl: sslConfig,
       max: parseInt(process.env.DB_POOL_MAX || '20', 10),
       min: parseInt(process.env.DB_POOL_MIN || '2', 10),
       idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000', 10),
@@ -31,8 +63,8 @@ const poolConfig = hasDatabaseUrl
       port: parseInt(process.env.DB_PORT || '5432', 10),
       database: (process.env.DB_NAME || 'usage_metering').trim(),
       user: (process.env.DB_USER || 'postgres').trim(),
-      password: (process.env.DB_PASSWORD || 'password').trim(),
-      ssl: useSsl ? { rejectUnauthorized: false } : false,
+      password: (process.env.DB_PASSWORD || '').trim(),
+      ssl: sslConfig,
       max: parseInt(process.env.DB_POOL_MAX || '20', 10),
       min: parseInt(process.env.DB_POOL_MIN || '2', 10),
       idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT || '30000', 10),
@@ -50,5 +82,7 @@ pool.on('connect', () => {
 pool.on('error', (err) => {
   console.error('[PostgreSQL Pool Error] Unexpected error on idle client:', err.message);
 });
+
+pool.buildSslConfig = buildSslConfig;
 
 module.exports = pool;

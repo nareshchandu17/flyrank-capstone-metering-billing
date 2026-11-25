@@ -50,11 +50,13 @@ async function initializeDatabase() {
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS hosted_invoice_url TEXT;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_pdf TEXT;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
+      ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_event_created BIGINT DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS pricing_rules (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           category VARCHAR(50) NOT NULL,
           rule_key VARCHAR(50) NOT NULL,
+          tier_name VARCHAR(100),
           name VARCHAR(100) NOT NULL,
           rate_cents NUMERIC(14, 6) NOT NULL,
           billing_unit VARCHAR(50) NOT NULL,
@@ -68,6 +70,8 @@ async function initializeDatabase() {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           CONSTRAINT uq_pricing_rules_category_key UNIQUE (category, rule_key)
       );
+      ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS tier_name VARCHAR(100);
+      ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS unit_multiplier NUMERIC(14, 2) NOT NULL DEFAULT 1.0;
       CREATE INDEX IF NOT EXISTS idx_pricing_rules_active ON pricing_rules(category, is_active);
 
       CREATE TABLE IF NOT EXISTS webhook_events (
@@ -197,6 +201,22 @@ async function startServer() {
     }
   }
 
+  // Validate Stripe billing configuration before accepting traffic
+  let stripeEnvStatus = 'not_configured';
+  const stripeEnv = stripeService.getStripeEnvironment();
+  if (stripeEnv === 'production' || stripeEnv === 'staging' || stripeService.isConfigured()) {
+    try {
+      const stripeValidation = await stripeService.validateStripeConfig();
+      stripeEnvStatus = stripeValidation.environment;
+      console.log(`💳 Stripe: ${stripeEnvStatus} billing integration verified`);
+    } catch (err) {
+      console.error(`❌ Stripe Configuration Error (${stripeEnv}):`, err.message);
+      if (stripeEnv === 'production' || stripeEnv === 'staging') {
+        process.exit(1);
+      }
+    }
+  }
+
   server = app.listen(PORT, () => {
       console.log('='.repeat(60));
       console.log('🚀 Usage Metering & Billing Engine - Backend Server');
@@ -206,16 +226,11 @@ async function startServer() {
       console.log(`🎨 Frontend UI: http://localhost:5173`);
       console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔐 Identity: Auth0 JWT verification active`);
-
-      if (stripeService.isConfigured()) {
-        stripeService.validateStripeConfig().then(() => {
-          console.log(`💳 Stripe: Test-mode billing integration verified`);
-        }).catch((err) => {
-          console.warn(`⚠️  Stripe Config Notice: ${err.message}`);
-        });
-      } else {
-        console.log(`💳 Stripe: Not configured (running in local metering mode)`);
-      }
+      console.log(
+        stripeEnvStatus === 'not_configured'
+          ? `💳 Stripe: Not configured (running in local metering mode)`
+          : `💳 Stripe: ${stripeEnvStatus} mode active`
+      );
 
       // Start background jobs
       invoiceJob.start();

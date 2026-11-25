@@ -35,7 +35,7 @@ async function initializeDatabase() {
         port: parseInt(process.env.DB_PORT || '5432', 10),
         database: process.env.DB_NAME || 'usage_metering',
         user: process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASSWORD || 'password',
+        password: process.env.DB_PASSWORD || '',
       };
 
   try {

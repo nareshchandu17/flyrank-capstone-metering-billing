@@ -20,8 +20,10 @@ CREATE TABLE IF NOT EXISTS pricing_rules (
     category VARCHAR(50) NOT NULL, -- 'api_call' or 'ai_token'
     rule_key VARCHAR(50) NOT NULL, -- 'tier_1', 'tier_2', 'tier_3' or 'input', 'cached_input', 'output', 'reasoning'
     tier_name VARCHAR(100),
-    rate_cents NUMERIC(14, 4) NOT NULL,
-    billing_unit BIGINT NOT NULL DEFAULT 1,
+    name VARCHAR(100),
+    rate_cents NUMERIC(14, 6) NOT NULL,
+    billing_unit VARCHAR(50) NOT NULL DEFAULT 'unit',
+    unit_multiplier NUMERIC(14, 2) NOT NULL DEFAULT 1.0,
     currency VARCHAR(10) NOT NULL DEFAULT 'USD',
     tier_min_units BIGINT DEFAULT 0,
     tier_max_units BIGINT,
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     plan_id UUID REFERENCES plans(id),
     current_period_start TIMESTAMP,
     current_period_end TIMESTAMP,
+    last_event_created BIGINT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(tenant_id, stripe_subscription_id)
@@ -269,18 +272,18 @@ INSERT INTO plans (name, api_calls_limit, ai_tokens_limit, allow_overage, base_p
 ON CONFLICT (name) DO NOTHING;
 
 -- Seed initial pricing rules only if not present, never overwriting administrative customizations
-INSERT INTO pricing_rules (category, rule_key, tier_name, rate_cents, billing_unit, currency, tier_min_units, tier_max_units, is_active)
+INSERT INTO pricing_rules (category, rule_key, tier_name, rate_cents, billing_unit, unit_multiplier, currency, tier_min_units, tier_max_units, is_active)
 VALUES
   -- API Calls (standard per-call rate = 1.0000 cent per 1 call)
-  ('api_call', 'tier_1', 'API Calls Tier 1', 1.0000, 1, 'USD', 0, 10000, true),
-  ('api_call', 'tier_2', 'API Calls Tier 2', 1.0000, 1, 'USD', 10001, 50000, true),
-  ('api_call', 'tier_3', 'API Calls Tier 3', 1.0000, 1, 'USD', 50001, NULL, true),
+  ('api_call', 'tier_1', 'API Calls Tier 1', 1.0000, 'per_call', 1, 'USD', 0, 10000, true),
+  ('api_call', 'tier_2', 'API Calls Tier 2', 1.0000, 'per_call', 1, 'USD', 10001, 50000, true),
+  ('api_call', 'tier_3', 'API Calls Tier 3', 1.0000, 'per_call', 1, 'USD', 50001, NULL, true),
 
   -- AI Tokens (rates in cents per 1,000,000 tokens)
-  ('ai_token', 'input', 'AI Input Tokens', 30.0000, 1000000, 'USD', 0, NULL, true),
-  ('ai_token', 'cached_input', 'AI Cached Input Tokens', 10.0000, 1000000, 'USD', 0, NULL, true),
-  ('ai_token', 'output', 'AI Output Tokens', 60.0000, 1000000, 'USD', 0, NULL, true),
-  ('ai_token', 'reasoning', 'AI Reasoning Tokens', 60.0000, 1000000, 'USD', 0, NULL, true)
+  ('ai_token', 'input', 'AI Input Tokens', 30.0000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true),
+  ('ai_token', 'cached_input', 'AI Cached Input Tokens', 10.0000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true),
+  ('ai_token', 'output', 'AI Output Tokens', 60.0000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true),
+  ('ai_token', 'reasoning', 'AI Reasoning Tokens', 60.0000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true)
 ON CONFLICT (category, rule_key) DO NOTHING;
 
 -- Function to update updated_at timestamp

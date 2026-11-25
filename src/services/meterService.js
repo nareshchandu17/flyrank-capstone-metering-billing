@@ -33,16 +33,44 @@ class MeterService {
       throw err;
     }
 
-    // Strict idempotency key validation
-    if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.trim().length === 0) {
+    // Strict idempotency key validation: length (1..255) and safe character set
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
       const err = new Error('Missing or invalid idempotency_key. Must be a non-empty string.');
       err.statusCode = 400;
       throw err;
     }
+    if (idempotencyKey.length > 255) {
+      const err = new Error('Invalid idempotency_key: exceeds maximum length of 255 characters.');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!/^[A-Za-z0-9._:-]{1,255}$/.test(idempotencyKey)) {
+      const err = new Error(
+        'Invalid idempotency_key: only alphanumeric characters, ".", "_", ":", and "-" are allowed.'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
 
-    // Strict token breakdown validation if metadata contains token fields
+    if (metadata !== undefined && metadata !== null && (typeof metadata !== 'object' || Array.isArray(metadata))) {
+      const err = new Error('Invalid metadata: must be a JSON object.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Strict token breakdown validation if metadata contains token fields or aliases
     if (metadata && typeof metadata === 'object') {
-      const tokenFields = ['input_tokens', 'cached_input_tokens', 'cached_tokens', 'output_tokens', 'reasoning_tokens'];
+      const tokenFields = [
+        'input_tokens',
+        'input',
+        'cached_input_tokens',
+        'cached_input',
+        'cached_tokens',
+        'output_tokens',
+        'output',
+        'reasoning_tokens',
+        'reasoning',
+      ];
       for (const field of tokenFields) {
         if (metadata[field] !== undefined && metadata[field] !== null) {
           if (typeof metadata[field] !== 'number' || !Number.isInteger(metadata[field]) || metadata[field] < 0) {
@@ -56,30 +84,91 @@ class MeterService {
   }
 
   /**
-   * Check if an existing event payload matches the incoming request
+   * Parse raw metadata into an object safely.
+   * @private
+   */
+  _parseMetadata(metadata) {
+    if (!metadata) return {};
+    if (typeof metadata === 'string') {
+      try {
+        const parsed = JSON.parse(metadata);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (_err) {
+        return {};
+      }
+    }
+    return typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+  }
+
+  /**
+   * Build canonical billable payload representation.
+   * Normalization rules:
+   * - Absent/null token fields normalize to 0 (matching 0 values).
+   * - Token aliases (input, cached_input, cached_tokens, output, reasoning) normalize to canonical *_tokens keys.
+   * - Other billing-affecting fields (model, tier, currency, billing_unit, unit_price_cents) normalize absent/null to null.
+   */
+  canonicalizeBillablePayload(usageType, quantity, metadata = {}) {
+    const meta = this._parseMetadata(metadata);
+    const toIntOrZero = (val) => (val === undefined || val === null ? 0 : Number(val));
+    const toStrOrNull = (val) => (val === undefined || val === null || val === '' ? null : String(val).trim().toLowerCase());
+    const toNumOrNull = (val) => (val === undefined || val === null ? null : Number(val));
+
+    return {
+      usage_type: usageType,
+      quantity: Number(quantity),
+      input_tokens: toIntOrZero(meta.input_tokens ?? meta.input),
+      cached_input_tokens: toIntOrZero(meta.cached_input_tokens ?? meta.cached_input ?? meta.cached_tokens),
+      output_tokens: toIntOrZero(meta.output_tokens ?? meta.output),
+      reasoning_tokens: toIntOrZero(meta.reasoning_tokens ?? meta.reasoning),
+      model: toStrOrNull(meta.model),
+      tier: toStrOrNull(meta.tier),
+      currency: toStrOrNull(meta.currency),
+      billing_unit: toStrOrNull(meta.billing_unit),
+      unit_price_cents: toNumOrNull(meta.unit_price_cents),
+    };
+  }
+
+  /**
+   * Normalize metadata for persistence so stored events use the same canonical rules as comparisons.
+   */
+  normalizeMetadataForStorage(usageType, metadata = {}) {
+    const meta = { ...this._parseMetadata(metadata) };
+    if (usageType === 'ai_tokens') {
+      const canonical = this.canonicalizeBillablePayload(usageType, 0, meta);
+      delete meta.input;
+      delete meta.cached_input;
+      delete meta.cached_tokens;
+      delete meta.output;
+      delete meta.reasoning;
+      meta.input_tokens = canonical.input_tokens;
+      meta.cached_input_tokens = canonical.cached_input_tokens;
+      meta.output_tokens = canonical.output_tokens;
+      meta.reasoning_tokens = canonical.reasoning_tokens;
+    }
+    return meta;
+  }
+
+  /**
+   * Check if an existing event payload matches the incoming request using canonical billable fields.
    */
   isMatchingPayload(existingEvent, incomingUsageType, incomingQuantity, incomingMetadata = {}) {
-    if (existingEvent.usage_type !== incomingUsageType) {
-      return false;
-    }
-    if (parseInt(existingEvent.quantity, 10) !== incomingQuantity) {
-      return false;
-    }
+    const existingCanonical = this.canonicalizeBillablePayload(
+      existingEvent.usage_type,
+      parseInt(existingEvent.quantity, 10),
+      existingEvent.metadata
+    );
+    const incomingCanonical = this.canonicalizeBillablePayload(
+      incomingUsageType,
+      incomingQuantity,
+      incomingMetadata
+    );
 
-    // Compare token breakdown if present in metadata
-    const existingMeta = typeof existingEvent.metadata === 'string'
-      ? JSON.parse(existingEvent.metadata || '{}')
-      : (existingEvent.metadata || {});
-
-    const tokenFields = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_tokens'];
-    for (const field of tokenFields) {
-      const existVal = existingMeta[field];
-      const incomingVal = incomingMetadata[field];
-      if (existVal !== undefined && incomingVal !== undefined && existVal !== incomingVal) {
+    const keys = Object.keys(existingCanonical);
+    for (const key of keys) {
+      if (existingCanonical[key] !== incomingCanonical[key]) {
         return false;
       }
     }
-
     return true;
   }
 
@@ -141,12 +230,13 @@ class MeterService {
         };
       }
       
-      // 4. Insert new usage event
+      // 4. Insert new usage event with canonically normalized metadata
+      const normalizedMetadata = this.normalizeMetadataForStorage(usageType, metadata);
       const insertResult = await client.query(
         `INSERT INTO usage_events (tenant_id, usage_type, quantity, idempotency_key, metadata)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [tenantId, usageType, quantity, idempotencyKey, JSON.stringify(metadata)]
+        [tenantId, usageType, quantity, idempotencyKey, JSON.stringify(normalizedMetadata)]
       );
       
       await client.query('COMMIT');
