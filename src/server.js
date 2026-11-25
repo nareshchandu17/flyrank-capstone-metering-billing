@@ -74,6 +74,21 @@ async function initializeDatabase() {
       ALTER TABLE pricing_rules ADD COLUMN IF NOT EXISTS unit_multiplier NUMERIC(14, 2) NOT NULL DEFAULT 1.0;
       CREATE INDEX IF NOT EXISTS idx_pricing_rules_active ON pricing_rules(category, is_active);
 
+      -- Seed default pricing rules only when the table is completely empty
+      INSERT INTO pricing_rules (category, rule_key, tier_name, name, rate_cents, billing_unit, unit_multiplier, currency, tier_min_units, tier_max_units, is_active)
+      SELECT v.category, v.rule_key, v.tier_name, v.name, v.rate_cents, v.billing_unit, v.unit_multiplier, v.currency, v.tier_min_units, v.tier_max_units, v.is_active
+      FROM (VALUES
+        ('api_call', 'tier_1', 'API Calls Tier 1', 'API Calls (0 - 10,000)', 500.000000, 'per_1k_units', 1000, 'USD', 0, 10000, true),
+        ('api_call', 'tier_2', 'API Calls Tier 2', 'API Calls (10,001 - 100,000)', 300.000000, 'per_1k_units', 1000, 'USD', 10000, 100000, true),
+        ('api_call', 'tier_3', 'API Calls Tier 3', 'API Calls (> 100,000)', 150.000000, 'per_1k_units', 1000, 'USD', 100000, NULL, true),
+        ('ai_token', 'input', 'AI Input Tokens', 'AI Input Tokens', 15.000000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true),
+        ('ai_token', 'cached_input', 'AI Cached Input Tokens', 'AI Cached Input Tokens', 7.500000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true),
+        ('ai_token', 'output', 'AI Output Tokens', 'AI Output Tokens', 60.000000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true),
+        ('ai_token', 'reasoning', 'AI Reasoning Tokens', 'AI Reasoning Tokens', 60.000000, 'per_1m_tokens', 1000000, 'USD', 0, NULL, true)
+      ) AS v(category, rule_key, tier_name, name, rate_cents, billing_unit, unit_multiplier, currency, tier_min_units, tier_max_units, is_active)
+      WHERE NOT EXISTS (SELECT 1 FROM pricing_rules LIMIT 1)
+      ON CONFLICT (category, rule_key) DO NOTHING;
+
       CREATE TABLE IF NOT EXISTS webhook_events (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           stripe_event_id VARCHAR(255) UNIQUE NOT NULL,
