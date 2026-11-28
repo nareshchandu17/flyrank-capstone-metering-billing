@@ -1,27 +1,36 @@
 const rateLimit = require('express-rate-limit');
 
 const VALID_FAILURE_POLICIES = new Set(['fail-closed', 'fail-open']);
+const REDIS_CONNECT_TIMEOUT_MS = 5000;
 
-/**
- * Resolve explicit rate-limit failure policy when Redis is unavailable.
- * Defaults to 'fail-closed' in production and 'fail-open' in non-production.
- */
 function resolveFailurePolicy(env = process.env) {
   const configured = (env.RATE_LIMIT_FAILURE_POLICY || '').trim().toLowerCase();
-  if (!configured) {
-    return env.NODE_ENV === 'production' ? 'fail-closed' : 'fail-open';
-  }
+  if (!configured) return env.NODE_ENV === 'production' ? 'fail-closed' : 'fail-open';
+
   if (!VALID_FAILURE_POLICIES.has(configured)) {
-    throw new Error(
-      `Invalid RATE_LIMIT_FAILURE_POLICY "${configured}". Must be "fail-closed" or "fail-open".`
-    );
+    throw new Error(`Invalid RATE_LIMIT_FAILURE_POLICY "${configured}". Must be "fail-closed" or "fail-open".`);
+  }
+  if (env.NODE_ENV === 'production' && configured !== 'fail-closed') {
+    throw new Error('FATAL CONFIGURATION ERROR: RATE_LIMIT_FAILURE_POLICY must be "fail-closed" in production.');
   }
   return configured;
 }
 
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /**
- * Create distributed or development rate limiters with explicit Redis & failure-policy enforcement.
- * @param {Object} [options]
+ * Production requires Redis and fails closed for both connection loss and
+ * RedisStore command errors. IORedis reconnects automatically; traffic resumes
+ * only after its ready event. Development may use the in-memory store.
  */
 function createRateLimiters(options = {}) {
   const env = options.env || process.env;
@@ -30,9 +39,13 @@ function createRateLimiters(options = {}) {
   const failurePolicy = options.failurePolicy || resolveFailurePolicy(env);
 
   if (!VALID_FAILURE_POLICIES.has(failurePolicy)) {
-    throw new Error(
-      `Invalid rate limiter failure policy "${failurePolicy}". Must be "fail-closed" or "fail-open".`
-    );
+    throw new Error(`Invalid rate limiter failure policy "${failurePolicy}".`);
+  }
+  if (isProduction && failurePolicy !== 'fail-closed') {
+    throw new Error('FATAL CONFIGURATION ERROR: Production rate limiting must fail closed.');
+  }
+  if (isProduction && !redisUrl && !options.storeFactory) {
+    throw new Error('FATAL CONFIGURATION ERROR: REDIS_URL is required in production for distributed rate limiting.');
   }
 
   const state = {
@@ -46,136 +59,101 @@ function createRateLimiters(options = {}) {
   };
 
   let storeFactory = options.storeFactory || null;
+  let redisClient = options.redisClient || null;
 
-  if (isProduction && !redisUrl && !storeFactory) {
-    throw new Error(
-      'FATAL CONFIGURATION ERROR: REDIS_URL is required in production for distributed rate limiting.'
-    );
-  }
+  const recordRedisError = (err) => {
+    state.redisConnected = false;
+    state.errorCount += 1;
+    state.lastError = err instanceof Error ? err.message : String(err || 'Unknown Redis error');
+    console.error('[RateLimiter] Redis error:', state.lastError);
+  };
 
   const attachRedisListeners = (client) => {
-    if (!client) return;
+    if (!client || typeof client.on !== 'function') return;
     state.client = client;
-    if (typeof client.on === 'function') {
-      client.on('connect', () => {
-        state.redisConnected = true;
-        state.lastError = null;
-        console.log('[RateLimiter] Redis connected for distributed rate limiting.');
-      });
-
-      client.on('ready', () => {
-        state.redisConnected = true;
-        state.lastError = null;
-      });
-
-      client.on('close', () => {
-        state.redisConnected = false;
-        console.warn('[RateLimiter] Redis connection closed.');
-      });
-
-      client.on('reconnecting', () => {
-        state.redisConnected = false;
-        console.warn('[RateLimiter] Redis reconnecting...');
-      });
-
-      client.on('error', (err) => {
-        state.redisConnected = false;
-        state.errorCount += 1;
-        state.lastError = err ? err.message : 'Unknown Redis error';
-        console.error('[RateLimiter] Redis connection error:', state.lastError);
-      });
-    }
-
-    if (client.status === 'ready' || client.status === 'connect') {
+    client.on('ready', () => {
       state.redisConnected = true;
-    }
+      state.lastError = null;
+      console.log('[RateLimiter] Redis ready for distributed rate limiting.');
+    });
+    client.on('connect', () => { state.redisConnected = false; });
+    client.on('close', () => {
+      state.redisConnected = false;
+      console.warn('[RateLimiter] Redis closed; rate-limited requests will fail closed.');
+    });
+    client.on('reconnecting', () => {
+      state.redisConnected = false;
+      console.warn('[RateLimiter] Redis reconnecting; rate-limited requests will fail closed.');
+    });
+    client.on('end', () => { state.redisConnected = false; });
+    client.on('error', recordRedisError);
+    state.redisConnected = client.status === 'ready';
   };
 
   if (redisUrl && !storeFactory) {
     try {
       const { RedisStore } = require('rate-limit-redis');
       const IORedis = require('ioredis');
-      const client = options.redisClient || new IORedis(redisUrl, {
-        enableOfflineQueue: failurePolicy === 'fail-open',
-        maxRetriesPerRequest: 2,
+      redisClient = redisClient || new IORedis(redisUrl, {
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 1,
+        connectTimeout: REDIS_CONNECT_TIMEOUT_MS,
+        retryStrategy: (attempt) => Math.min(attempt * 250, 3000),
       });
-
+      attachRedisListeners(redisClient);
+      storeFactory = (prefix) => new RedisStore({
+        prefix,
+        sendCommand: (...args) => redisClient.call(...args),
+      });
       state.mode = 'redis';
-      attachRedisListeners(client);
-
-      storeFactory = (prefix) =>
-        new RedisStore({
-          prefix,
-          sendCommand: (...args) => client.call(...args),
-        });
-
-      console.log(
-        `[RateLimiter] Configured distributed RedisStore (failurePolicy=${failurePolicy}).`
-      );
+      console.log(`[RateLimiter] Configured RedisStore (failurePolicy=${failurePolicy}).`);
     } catch (err) {
-      state.errorCount += 1;
-      state.lastError = err.message;
+      recordRedisError(err);
       if (isProduction) {
-        throw new Error(
-          `FATAL CONFIGURATION ERROR: Distributed Redis rate limiter failed to initialize in production: ${err.message}`
-        );
+        throw new Error(`FATAL CONFIGURATION ERROR: Cannot initialize production Redis rate limiting: ${err.message}`);
       }
-      console.warn(
-        '[RateLimiter] REDIS_URL provided but Redis driver could not be loaded. Operating with in-memory store:',
-        err.message
-      );
+      console.warn('[RateLimiter] Redis initialization failed; using in-memory limiter in non-production only.');
       storeFactory = null;
+      redisClient = null;
       state.mode = 'memory';
     }
   } else if (storeFactory) {
     state.mode = 'redis';
-    state.redisConnected = options.initialConnected !== false;
-    if (options.redisClient) {
-      attachRedisListeners(options.redisClient);
-    }
+    if (redisClient) attachRedisListeners(redisClient);
+    else state.redisConnected = options.initialConnected !== false;
+  }
+
+  if (isProduction && !redisClient && !options.storeFactory) {
+    throw new Error('FATAL CONFIGURATION ERROR: Production rate limiting requires an initialized Redis client.');
   }
 
   const buildLimiter = ({ prefix, windowMs, max, message }) => {
-    const store = storeFactory ? storeFactory(prefix) : undefined;
     const limiter = rateLimit({
       windowMs,
       max,
       standardHeaders: true,
       legacyHeaders: false,
-      store,
-      passOnStoreError: failurePolicy === 'fail-open',
+      store: storeFactory ? storeFactory(prefix) : undefined,
+      passOnStoreError: false,
       message,
     });
 
-    // Enforce explicit fail-open / fail-closed policy on store or Redis unavailability
     return (req, res, next) => {
-      if (state.mode === 'redis' && options.enforceConnectionCheck && !state.redisConnected) {
+      if (state.mode === 'redis' && !state.redisConnected) {
         state.errorCount += 1;
-        console.error(
-          `[RateLimiter] Redis unavailable (${state.lastError || 'disconnected'}); applying ${failurePolicy} policy.`
-        );
-        if (failurePolicy === 'fail-closed') {
-          return res.status(503).json({
-            error: 'Service Unavailable',
-            message: 'Rate limiting service is temporarily unavailable.',
-          });
-        }
-        return next();
+        return res.status(503).json({
+          error: 'Service Unavailable',
+          message: 'Rate limiting service is temporarily unavailable. Please retry shortly.',
+        });
       }
-
       return limiter(req, res, (err) => {
-        if (!err) {
-          return next();
-        }
-        state.errorCount += 1;
-        state.lastError = err.message;
-        console.error(
-          `[RateLimiter] Store error (${err.message}); applying ${failurePolicy} policy.`
-        );
+        if (!err) return next();
+        recordRedisError(err);
         if (failurePolicy === 'fail-closed') {
           return res.status(503).json({
             error: 'Service Unavailable',
-            message: 'Rate limiting service is temporarily unavailable.',
+            message: 'Rate limiting service is temporarily unavailable. Please retry shortly.',
           });
         }
         return next();
@@ -183,46 +161,17 @@ function createRateLimiters(options = {}) {
     };
   };
 
-  /**
-   * Standard API Rate Limiter
-   * Applies to standard human-facing API endpoints
-   */
   const apiLimiter = buildLimiter({
-    prefix: 'rl:api:',
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: options.apiMax || 300, // Limit each IP to 300 requests per 15 minutes
-    message: {
-      error: 'Too Many Requests',
-      message: 'Too many requests from this IP, please try again after 15 minutes',
-    },
+    prefix: 'rl:api:', windowMs: 15 * 60 * 1000, max: options.apiMax || 300,
+    message: { error: 'Too Many Requests', message: 'Too many requests from this IP. Please retry after 15 minutes.' },
   });
-
-  /**
-   * Sensitive Operations Rate Limiter
-   * Applies to checkout sessions, API key creation/rotation, and invitation acceptance
-   */
   const sensitiveOpLimiter = buildLimiter({
-    prefix: 'rl:sensitive:',
-    windowMs: 15 * 60 * 1000,
-    max: options.sensitiveMax || 50, // Limit to 50 requests per 15 minutes
-    message: {
-      error: 'Too Many Requests',
-      message: 'Too many sensitive operations requested, please try again later',
-    },
+    prefix: 'rl:sensitive:', windowMs: 15 * 60 * 1000, max: options.sensitiveMax || 50,
+    message: { error: 'Too Many Requests', message: 'Too many sensitive operations requested. Please retry later.' },
   });
-
-  /**
-   * High-Throughput Machine Ingestion Rate Limiter
-   * Applied to POST /api/usage for high-frequency micro-cent metering events
-   */
   const ingestionLimiter = buildLimiter({
-    prefix: 'rl:ingestion:',
-    windowMs: 1 * 60 * 1000, // 1 minute window
-    max: options.ingestionMax || 10000, // Up to 10,000 events/minute per IP
-    message: {
-      error: 'Rate Limit Exceeded',
-      message: 'Usage ingestion rate limit exceeded. Please back off and retry.',
-    },
+    prefix: 'rl:ingestion:', windowMs: 60 * 1000, max: options.ingestionMax || 10000,
+    message: { error: 'Rate Limit Exceeded', message: 'Usage ingestion rate limit exceeded. Please back off and retry.' },
   });
 
   return {
@@ -237,16 +186,33 @@ function createRateLimiters(options = {}) {
       errorCount: state.errorCount,
       lastError: state.lastError,
     }),
-    setRedisConnected: (connected, errorMsg = null) => {
-      state.redisConnected = Boolean(connected);
-      if (errorMsg) {
-        state.lastError = errorMsg;
-        state.errorCount += 1;
+    waitUntilReady: async (timeoutMs = REDIS_CONNECT_TIMEOUT_MS) => {
+      if (state.mode !== 'redis') {
+        if (isProduction) throw new Error('Production rate limiting has no Redis store.');
+        return;
       }
+      if (!redisClient) {
+        if (isProduction) throw new Error('Production Redis client is unavailable.');
+        return;
+      }
+      if (redisClient.status === 'wait' && typeof redisClient.connect === 'function') {
+        await redisClient.connect();
+      }
+      await withTimeout(redisClient.ping(), timeoutMs, 'Initial Redis readiness check');
+      if (redisClient.status !== 'ready') {
+        throw new Error('Redis PING succeeded but the client is not in ready state.');
+      }
+      state.redisConnected = true;
+      state.lastError = null;
     },
     close: async () => {
-      if (state.client && typeof state.client.quit === 'function') {
-        await state.client.quit();
+      if (redisClient && typeof redisClient.quit === 'function') {
+        try {
+          if (redisClient.status !== 'end') await redisClient.quit();
+        } catch (err) {
+          console.warn('[RateLimiter] Error closing Redis client:', err.message);
+          if (typeof redisClient.disconnect === 'function') redisClient.disconnect();
+        }
       }
     },
   };
@@ -259,6 +225,7 @@ module.exports = {
   sensitiveOpLimiter: defaultLimiters.sensitiveOpLimiter,
   ingestionLimiter: defaultLimiters.ingestionLimiter,
   getRateLimiterStatus: defaultLimiters.getStatus,
+  waitForRateLimiterReady: defaultLimiters.waitUntilReady,
   closeRateLimiter: defaultLimiters.close,
   createRateLimiters,
   resolveFailurePolicy,
